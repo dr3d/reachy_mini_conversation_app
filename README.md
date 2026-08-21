@@ -250,6 +250,8 @@ endpoints on a running board to get the firmware's current value lists:
 Open the board root URL in a browser, such as `http://reachyeyes-s3.local/` or `http://192.168.4.1/`, for a
 small built-in test panel. It gives direct controls for eye style, mood/expression, idle beats, mouth
 style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip.
+Eye style, mouth style, idle mode, and display flip are saved as reusable firmware preferences and restored after
+reboot; expressions, gaze, blinks, winks, sleep, and one-off mouth shapes remain temporary.
 
 ```bash
 EYES_URL=http://reachyeyes-s3.local

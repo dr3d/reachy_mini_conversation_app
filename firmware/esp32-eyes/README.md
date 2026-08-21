@@ -58,7 +58,7 @@ or, on the default access point:
 http://192.168.4.1/
 ```
 
-The built-in panel controls eye style, mood/expression, idle beats, mouth style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip.
+The built-in panel controls eye style, mood/expression, idle beats, mouth style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip. Eye style, mouth style, idle mode, and display flip are saved as reusable face preferences and restored after reboot; expressions, gaze, blinks, winks, sleep, and one-off mouth shapes remain temporary.
 
 ## OTA Firmware Updates
 

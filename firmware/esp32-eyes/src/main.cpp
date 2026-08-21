@@ -2093,6 +2093,45 @@ void setEyesFlipped(bool flipped) {
 #endif
 }
 
+bool saveFacePreferences() {
+  Preferences preferences;
+  if (!preferences.begin("reachy-face", false)) {
+    Serial.println("Failed to open face preferences.");
+    return false;
+  }
+  preferences.putString("eye_style", eyeStyleName(eyeRenderStyle));
+  preferences.putString("mouth_style", mouthStyleName(mouthState.style));
+  preferences.putBool("flipped", apiState.eyesFlipped);
+  preferences.putBool("idle", apiState.idleEnabled);
+  preferences.end();
+  return true;
+}
+
+void loadFacePreferences() {
+  Preferences preferences;
+  if (!preferences.begin("reachy-face", false)) return;
+
+  if (preferences.isKey("eye_style")) {
+    EyeRenderStyle style;
+    if (parseEyeStyleName(preferences.getString("eye_style", "").c_str(), style)) {
+      eyeRenderStyle = style;
+    }
+  }
+  if (preferences.isKey("mouth_style")) {
+    MouthStyle style;
+    if (parseMouthStyleName(preferences.getString("mouth_style", "").c_str(), style)) {
+      mouthState.style = style;
+    }
+  }
+  if (preferences.isKey("flipped")) {
+    apiState.eyesFlipped = preferences.getBool("flipped", false);
+  }
+  if (preferences.isKey("idle")) {
+    apiState.idleEnabled = preferences.getBool("idle", true);
+  }
+  preferences.end();
+}
+
 void initDisplay(Adafruit_GC9A01A &tft, uint8_t rotation) {
   tft.begin(SPI_HZ);
   tft.setRotation(rotation);
@@ -2249,6 +2288,7 @@ void handleApiLine(char *line) {
       Serial.println("ERR flip expected on/off/toggle");
       return;
     }
+    saveFacePreferences();
     Serial.printf("OK flip %s\n", apiState.eyesFlipped ? "on" : "off");
     return;
   }
@@ -2265,6 +2305,7 @@ void handleApiLine(char *line) {
       return;
     }
     eyeRenderStyle = style;
+    saveFacePreferences();
     Serial.printf("OK style %s\n", eyeStyleName(eyeRenderStyle));
     return;
   }
@@ -2349,10 +2390,12 @@ void handleApiLine(char *line) {
       scheduleNextIdleBeat(now, true);
       if (!apiState.moodOverride) moodState.next = now;
       if (!apiState.gazeOverride) gazeState.next = now;
+      saveFacePreferences();
       Serial.println("OK idle on");
     } else if (equalsIgnoreCase(arg, "off") || equalsIgnoreCase(arg, "0") || equalsIgnoreCase(arg, "false")) {
       apiState.idleEnabled = false;
       scheduleNextIdleBeat(now, true);
+      saveFacePreferences();
       Serial.println("OK idle off");
     } else {
       Serial.println("ERR idle expected on/off");
@@ -2818,6 +2861,7 @@ void handleHttpRelease() {
 void handleHttpIdle(JsonDocument &doc, uint32_t now) {
   const bool enabled = jsonBool(doc["idle"], jsonBool(doc["autonomous"], true));
   apiState.idleEnabled = enabled;
+  saveFacePreferences();
   scheduleNextIdleBeat(now, true);
   if (enabled) {
     if (!apiState.moodOverride) moodState.next = now;
@@ -2870,6 +2914,7 @@ bool handleHttpStyleName(const char *name) {
     return false;
   }
   eyeRenderStyle = style;
+  saveFacePreferences();
   return true;
 }
 
@@ -2906,6 +2951,7 @@ bool handleHttpMouth(JsonVariantConst value, JsonVariantConst durationValue, uin
       return false;
     }
     mouthState.style = style;
+    saveFacePreferences();
   }
   if (mouth["shape"].is<const char *>()) {
     MouthShape shape;
@@ -2980,9 +3026,11 @@ void handleHttpFlip(JsonVariantConst value) {
   if (value.isNull()) return;
   if (value.is<const char *>() && equalsIgnoreCase(value.as<const char *>(), "toggle")) {
     setEyesFlipped(!apiState.eyesFlipped);
+    saveFacePreferences();
     return;
   }
   setEyesFlipped(jsonBool(value, apiState.eyesFlipped));
+  saveFacePreferences();
 }
 
 void handleHttpControl() {
@@ -3294,11 +3342,13 @@ void setup() {
 #endif
 
   resetSharedDisplaysIfNeeded();
+  loadFacePreferences();
   initDisplay(leftTft, LEFT_ROTATION);
   initDisplay(rightTft, RIGHT_ROTATION);
 #if REACHY_HAS_MOUTH
   initDisplay(mouthTft, MOUTH_ROTATION);
 #endif
+  applyDisplayOrientation();
   setupWiFi();
   setupHttpRoutes();
   server.begin();
