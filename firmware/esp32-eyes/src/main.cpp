@@ -1817,19 +1817,15 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   }
 
   frame.fillScreen(BLACK);
-  frame.fillRoundRect(8, 48, 224, 150, 48, rgb(1, 1, 4));
-  frame.fillRoundRect(17, 57, 206, 132, 42, rgb(12, 10, 17));
-  frame.drawRoundRect(18, 58, 204, 130, 41, rgb(35, 32, 44));
-  frame.fillRoundRect(28, 76, 184, 94, 30, BLACK);
 
   if (shape == MouthShape::Sleep && !mouthState.talking) {
-    frame.fillRoundRect(61, 120, 118, 10, 5, rgb(20, 76, 140));
-    frame.drawFastHLine(73, 123, 94, rgb(90, 184, 244));
+    frame.fillRoundRect(33, 120, 174, 10, 5, rgb(20, 76, 140));
+    frame.drawFastHLine(48, 123, 144, rgb(90, 184, 244));
     return;
   }
 
-  const int16_t w = int16_t(96.0f + pose.width * 170.0f);
-  const int16_t h = int16_t(14.0f + pose.open * 110.0f);
+  const int16_t w = int16_t(120.0f + pose.width * 210.0f);
+  const int16_t h = int16_t(16.0f + pose.open * 116.0f);
   const int16_t cx = 120 + int16_t(pose.skew * 26.0f);
   const int16_t cy = 126 + int16_t(pose.tension * 5.0f);
   const int16_t x = cx - w / 2;
