@@ -200,7 +200,7 @@ select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(
 <h2>Wi-Fi</h2>
 <div class="row"><label>Status</label><span id="wifiStatus">loading</span></div>
 <div class="row"><label for="ssid">LAN SSID</label><input id="ssid" autocomplete="off" placeholder="Your Wi-Fi name"></div>
-<div class="row"><label for="wifiPass">Password</label><input id="wifiPass" type="password" autocomplete="new-password" placeholder="Leave blank for open network"></div>
+<div class="row"><label for="wifiPass">Password</label><input id="wifiPass" autocomplete="off" placeholder="Leave blank for open network"></div>
 <div class="actions">
 <button class="primary" id="wifiSave">Save & Reboot</button>
 <button class="warn" id="wifiClear">Clear Saved</button>

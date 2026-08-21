@@ -32,7 +32,7 @@ If no station Wi-Fi credentials are set, the board starts an access point named 
 http://192.168.4.1/
 ```
 
-From that AP page, use the Wi-Fi card to enter your LAN SSID and password. The board saves those credentials in ESP32 non-volatile storage and reboots. The saved password is never shown back in the UI or API response. Use **Clear Saved** to remove stored credentials and reboot back to the compile-time/default behavior.
+From that AP page, use the Wi-Fi card to enter your LAN SSID and password. The password field is plain text for easy bench setup. The board saves those credentials in ESP32 non-volatile storage and reboots; saved passwords are not returned by the status API. Use **Clear Saved** to remove stored credentials and reboot back to the compile-time/default behavior.
 
 When station Wi-Fi succeeds, the serial monitor prints the LAN address:
 
