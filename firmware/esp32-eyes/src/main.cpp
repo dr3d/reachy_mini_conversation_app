@@ -8,6 +8,7 @@
 #include <esp_system.h>
 #include <ctype.h>
 #include <math.h>
+#include <pgmspace.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,6 +104,140 @@ constexpr uint16_t LID_LIGHT = 0x0841;
 constexpr uint16_t LID_RIM = 0x0000;
 constexpr uint16_t LID_SHADOW = 0x0000;
 constexpr uint16_t RED_VEIN = 0x8804;
+
+const char FACE_UI_HTML[] PROGMEM = R"FACEUI(
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reachy Face Control</title>
+<style>
+:root{color-scheme:dark;--bg:#08090d;--panel:#141720;--panel2:#10131a;--line:#2a3140;--text:#eef2f6;--muted:#9aa6b2;--accent:#55c7ff;--ok:#68d391;--warn:#f6ad55;--bad:#fc8181}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1100px;margin:0 auto;padding:16px}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}h1{font-size:20px;margin:0 0 4px}p{margin:0;color:var(--muted)}button,select,input{font:inherit}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}.card h2{font-size:15px;margin:0 0 10px}
+.row{display:grid;grid-template-columns:95px 1fr;align-items:center;gap:8px;margin:8px 0}.row label{color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{border:1px solid var(--line);background:#202633;color:var(--text);border-radius:7px;padding:7px 10px;cursor:pointer}button:hover{border-color:var(--accent)}button.primary{background:#0f3f5b;border-color:#217aa8}button.warn{background:#46301a;border-color:#8a5c24}
+select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:7px;padding:7px}input[type=range]{padding:0}.seg{display:flex;gap:6px}.seg button{flex:1}.status{white-space:pre-wrap;background:#07080b;border:1px solid var(--line);border-radius:8px;padding:10px;min-height:98px;color:#cbd5df;font:12px/1.35 ui-monospace,SFMono-Regular,Consolas,monospace}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div><h1>Reachy Face Control</h1><p>Direct ESP32 test panel for eyes, mouth, gaze, idle beats, and display settings.</p></div>
+<div class="pill"><span id="dot" class="dot"></span><span id="summary">connecting</span></div>
+</header>
+<section class="grid">
+<div class="card">
+<h2>Eyes</h2>
+<div class="row"><label for="style">Style</label><select id="style"></select></div>
+<div class="actions"><button class="primary" data-post="/style" data-select="style" data-key="name">Apply Style</button></div>
+<div class="row"><label for="mood">Mood</label><select id="mood"></select></div>
+<div class="row"><label for="moodDur">Duration s</label><input id="moodDur" type="number" min="0" step="0.1" value="4"></div>
+<div class="actions">
+<button data-post="/mood" data-select="mood" data-key="name" data-duration="moodDur">Mood</button>
+<button data-post="/expression" data-select="mood" data-key="name" data-duration="moodDur">Expression</button>
+</div>
+</div>
+<div class="card">
+<h2>Mouth</h2>
+<div class="row"><label for="mouthStyle">Style</label><select id="mouthStyle"></select></div>
+<div class="row"><label for="mouthShape">Shape</label><select id="mouthShape"></select></div>
+<div class="row"><label for="energy">Energy</label><input id="energy" type="range" min="0" max="1" step="0.05" value="0.65"></div>
+<div class="row"><label for="mouthDur">Duration s</label><input id="mouthDur" type="number" min="0" step="0.1" value="0"></div>
+<div class="actions">
+<button class="primary" id="mouthApply">Apply</button>
+<button id="mouthTalk">Talk</button>
+<button id="mouthStop">Stop Talk</button>
+<button id="mouthAuto">Auto</button>
+</div>
+</div>
+<div class="card">
+<h2>Gaze</h2>
+<div class="row"><label for="gx">X left/right</label><input id="gx" type="range" min="-1" max="1" step="0.05" value="0"></div>
+<div class="row"><label for="gy">Y up/down</label><input id="gy" type="range" min="-1" max="1" step="0.05" value="0"></div>
+<div class="row"><label for="gdur">Hold s</label><input id="gdur" type="number" min="0" step="0.1" value="0"></div>
+<div class="row"><label for="gmove">Move ms</label><input id="gmove" type="number" min="0" step="10" value="180"></div>
+<div class="actions">
+<button class="primary" id="gazeApply">Apply Gaze</button>
+<button id="gazeCenter">Center</button>
+<button id="gazeAuto">Auto</button>
+</div>
+</div>
+<div class="card">
+<h2>Idle Beats</h2>
+<div class="row"><label for="beat">Beat</label><select id="beat"></select></div>
+<div class="actions">
+<button class="primary" data-post="/beat" data-select="beat" data-key="name">Play Beat</button>
+<button id="idleOn">Idle On</button>
+<button id="idleOff">Idle Off</button>
+</div>
+</div>
+<div class="card">
+<h2>Quick Actions</h2>
+<div class="actions">
+<button id="blink">Blink</button>
+<button id="doubleBlink">Double Blink</button>
+<button id="winkL">Wink L</button>
+<button id="winkR">Wink R</button>
+<button class="warn" id="sleep">Sleep</button>
+<button class="primary" id="release">Release</button>
+</div>
+</div>
+<div class="card">
+<h2>Display</h2>
+<div class="row"><label for="bright">Brightness</label><input id="bright" type="range" min="0" max="100" step="1" value="90"></div>
+<div class="actions">
+<button class="primary" id="brightApply">Apply</button>
+<button id="flip">Flip</button>
+</div>
+</div>
+<div class="card">
+<h2>Status</h2>
+<div id="status" class="status">loading...</div>
+<div class="actions"><button id="refresh">Refresh</button></div>
+</div>
+</section>
+</main>
+<script>
+const fallback={style:["friendly","classic","cartoony","robot","sinister","sleepy"],mood:["calm","curious","surprised","suspicious","afraid","angry","sleepy","sleep","goofy","robotic","wonder","glitchy","happy","delighted","bashful","bored","focused","confused","proud","mischief","affection"],beat:["slow_smile","affection","inspect","thoughtful","daydream","mischief","confused","focus_lock","double_take","goofy","drowsy","robot_scan","wary","startle"],mouthStyle:["human","robot"],mouthShape:["neutral","smile","smirk_left","smirk_right","open","wide","frown","grimace","sneer","sleep"]};
+const $=id=>document.getElementById(id);
+function fill(id,values){$(id).innerHTML=values.map(v=>'<option value="'+v+'">'+v+'</option>').join('')}
+async function values(path,key,id){try{const r=await fetch(path);const j=await r.json();fill(id,j[key]||fallback[id])}catch(e){fill(id,fallback[id])}}
+async function post(path,payload={}){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json().catch(()=>({ok:false,error:"bad json"}));if(!r.ok||j.ok===false)throw new Error(j.error||r.statusText);render(j);return j}
+function number(id){return Number($(id).value)}
+function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const gaze=j.gaze||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("bright").value=j.brightness_percent??$("bright").value}
+async function refresh(){try{const r=await fetch("/state");render(await r.json())}catch(e){$("dot").className="dot bad";$("summary").textContent=e.message;$("status").textContent=e.stack||e.message}}
+function payloadFromButton(b){const p={};if(b.dataset.select)p[b.dataset.key||"name"]=$(b.dataset.select).value;if(b.dataset.duration)p.duration=number(b.dataset.duration);return p}
+document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;try{
+if(b.dataset.post){await post(b.dataset.post,payloadFromButton(b));return}
+if(b.id==="mouthApply")await post("/mouth",{style:$("mouthStyle").value,shape:$("mouthShape").value,energy:number("energy"),duration:number("mouthDur")});
+else if(b.id==="mouthTalk")await post("/mouth",{style:$("mouthStyle").value,shape:$("mouthShape").value,talking:true,energy:number("energy"),duration:number("mouthDur")});
+else if(b.id==="mouthStop")await post("/mouth",{talking:false,duration:number("mouthDur")});
+else if(b.id==="mouthAuto")await post("/mouth",{auto:true});
+else if(b.id==="gazeApply")await post("/gaze",{x:number("gx"),y:number("gy"),duration:number("gdur"),move_ms:number("gmove")});
+else if(b.id==="gazeCenter")await post("/gaze",{x:0,y:0,duration:number("gdur"),move_ms:number("gmove")});
+else if(b.id==="gazeAuto")await post("/gaze","auto");
+else if(b.id==="idleOn")await post("/control",{idle:true});
+else if(b.id==="idleOff")await post("/control",{idle:false});
+else if(b.id==="blink")await post("/blink",{});
+else if(b.id==="doubleBlink")await post("/blink",{double:true});
+else if(b.id==="winkL")await post("/wink",{eye:"left"});
+else if(b.id==="winkR")await post("/wink",{eye:"right"});
+else if(b.id==="sleep")await post("/sleep",{duration:0});
+else if(b.id==="release")await post("/release",{});
+else if(b.id==="brightApply")await post("/control",{brightness_percent:number("bright")});
+else if(b.id==="flip")await post("/control",{flip:"toggle"});
+else if(b.id==="refresh")await refresh();
+}catch(err){$("dot").className="dot bad";$("summary").textContent=err.message;$("status").textContent=err.stack||err.message}});
+async function init(){await Promise.all([values("/styles","styles","style"),values("/moods","moods","mood"),values("/beats","beats","beat"),values("/mouth_styles","mouth_styles","mouthStyle"),values("/mouth_shapes","mouth_shapes","mouthShape")]);await refresh();setInterval(refresh,2500)}
+init();
+</script>
+</body>
+</html>
+)FACEUI";
 
 #if !USE_SOFTWARE_SPI
 #ifndef HSPI
@@ -2779,7 +2914,7 @@ void handleHttpSleepEndpoint() {
 void setupHttpRoutes() {
   server.on("/", HTTP_GET, [] {
     sendCors();
-    server.send(200, "text/plain", "Reachy ESP32 eyes API\n");
+    server.send_P(200, "text/html", FACE_UI_HTML);
   });
   server.on("/health", HTTP_GET, [] { sendOk("healthy"); });
   server.on("/state", HTTP_GET, handleHttpState);

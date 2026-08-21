@@ -245,6 +245,10 @@ The ESP32 eyes API is intentionally high-level. The app sends semantic cues over
 rendering, easing, blinking, idle beats, gaze projection, brightness, and display orientation. Query these
 endpoints on a running board to get the firmware's current value lists:
 
+Open the board root URL in a browser, such as `http://reachyeyes-s3.local/` or `http://192.168.4.1/`, for a
+small built-in test panel. It gives direct controls for eye style, mood/expression, idle beats, mouth
+style/shape/talking energy, gaze, blink/wink, sleep, release, brightness, and display flip.
+
 ```bash
 EYES_URL=http://reachyeyes-s3.local
 curl "$EYES_URL/state"
