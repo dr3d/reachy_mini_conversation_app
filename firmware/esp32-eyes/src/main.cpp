@@ -1953,15 +1953,23 @@ MouthShape activeMouthShape(uint32_t now) {
 }
 
 void drawMouthTeeth(int16_t x, int16_t y, int16_t w, int16_t h, float amount) {
-  if (amount <= 0.01f || h < 14 || w < 36) return;
-  const int16_t teethH = int16_t(clampf(float(h) * (0.22f + amount * 0.18f), 4.0f, 18.0f));
-  const uint16_t enamel = rgb(188, 220, 232);
-  const uint16_t seam = rgb(44, 82, 100);
+  if (amount <= 0.01f || h < 12 || w < 36) return;
+  const int16_t teethH = int16_t(clampf(float(h) * (0.24f + amount * 0.18f), 5.0f, 22.0f));
+  const uint16_t enamel = rgb(238, 228, 198);
+  const uint16_t seam = rgb(126, 104, 98);
   frame.fillRoundRect(x, y, w, teethH, 5, enamel);
   frame.drawFastHLine(x + 4, y + teethH - 1, w - 8, seam);
   for (int16_t tx = x + 18; tx < x + w - 10; tx += 18) {
     frame.drawFastVLine(tx, y + 2, teethH - 4, seam);
   }
+}
+
+void drawMouthTongue(int16_t cx, int16_t y, int16_t rx, int16_t ry) {
+  if (rx < 14 || ry < 4) return;
+  const uint16_t tongue = rgb(162, 54, 72);
+  const uint16_t tongueHi = rgb(218, 94, 106);
+  fillEllipse(frame, cx, y, rx, ry, tongue);
+  fillEllipse(frame, cx - rx / 5, y - ry / 4, maxi16(4, rx / 3), maxi16(2, ry / 4), tongueHi);
 }
 
 void renderHumanMouth(MouthShape shape, uint32_t now) {
@@ -1976,53 +1984,52 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   frame.fillScreen(BLACK);
 
   if (shape == MouthShape::Sleep && !mouthState.talking) {
-    frame.fillRoundRect(33, 120, 174, 10, 5, rgb(20, 76, 140));
-    frame.drawFastHLine(48, 123, 144, rgb(90, 184, 244));
+    frame.fillRoundRect(24, 119, 192, 14, 7, rgb(118, 28, 44));
+    frame.drawFastHLine(45, 122, 150, rgb(218, 92, 102));
+    frame.drawFastHLine(48, 130, 138, rgb(58, 8, 22));
     return;
   }
 
-  const int16_t w = int16_t(120.0f + pose.width * 210.0f);
-  const int16_t h = int16_t(16.0f + pose.open * 116.0f);
+  const int16_t w = int16_t(134.0f + pose.width * 226.0f);
+  const int16_t openH = int16_t(7.0f + pose.open * 92.0f);
+  const int16_t lipH = int16_t(clampf(22.0f + pose.open * 22.0f + pose.tension * 6.0f, 20.0f, 48.0f));
   const int16_t cx = 120 + int16_t(pose.skew * 26.0f);
-  const int16_t cy = 126 + int16_t(pose.tension * 5.0f);
-  const int16_t x = cx - w / 2;
-  const int16_t y = cy - h / 2;
-  const int16_t r = maxi16(8, h / 2 + 5);
-  const uint16_t glowDeep = rgb(0, 18, 70);
-  const uint16_t glow = rgb(8, 68, 176);
-  const uint16_t lip = rgb(38, 122, 238);
-  const uint16_t lipHi = rgb(118, 190, 255);
-  const uint16_t lipLo = rgb(10, 38, 128);
+  const int16_t cy = 126 + int16_t(pose.tension * 4.0f);
+  const int16_t curve = int16_t(pose.curve * 18.0f);
+  const int16_t cavityW = int16_t(float(w) * (0.86f - pose.tension * 0.05f));
+  const int16_t cavityH = maxi16(5, openH);
+  const int16_t topCy = cy - cavityH / 2 - lipH / 4 - curve / 3;
+  const int16_t bottomCy = cy + cavityH / 2 + lipH / 4 - curve / 5;
+  const int16_t cornerY = cy - curve + int16_t(pose.tension * 2.0f);
+  const uint16_t shadow = rgb(28, 0, 10);
+  const uint16_t lip = rgb(156, 38, 58);
+  const uint16_t lipHi = rgb(236, 104, 112);
+  const uint16_t lipLo = rgb(82, 10, 30);
+  const uint16_t cavity = rgb(9, 0, 5);
 
-  frame.fillRoundRect(x - 17, y - 15, w + 34, h + 30, r + 15, rgb(0, 6, 28));
-  frame.fillRoundRect(x - 9, y - 8, w + 18, h + 16, r + 8, glowDeep);
-  frame.fillRoundRect(x - 3, y - 3, w + 6, h + 6, r + 3, glow);
-  frame.fillRoundRect(x, y, w, h, r, lip);
+  fillEllipse(frame, cx, cy, w / 2 + 19, cavityH / 2 + lipH + 14, shadow);
+  fillEllipse(frame, cx, topCy, w / 2 + 8, maxi16(10, lipH / 2), lipLo);
+  fillEllipse(frame, cx, bottomCy, w / 2 + 12, maxi16(12, lipH / 2 + 4), lip);
+  fillEllipse(frame, cx, topCy - 3, w / 2, maxi16(8, lipH / 2 - 2), lip);
+  fillEllipse(frame, cx - w / 8, topCy - lipH / 5, w / 4, maxi16(3, lipH / 7), lipHi);
+  fillEllipse(frame, cx + w / 12, bottomCy - lipH / 6, w / 3, maxi16(3, lipH / 8), mixColor(lip, lipHi, 0.45f));
 
-  const int16_t innerPadX = int16_t(clampf(9.0f + pose.tension * 7.0f, 8.0f, 16.0f));
-  const int16_t innerPadY = int16_t(clampf(5.0f + (1.0f - pose.open) * 6.0f, 4.0f, 10.0f));
-  const int16_t innerH = maxi16(4, h - innerPadY * 2);
-  const int16_t innerW = maxi16(10, w - innerPadX * 2);
-  const int16_t innerX = x + innerPadX;
-  const int16_t innerY = y + innerPadY;
-
-  if (h > 17) {
-    frame.fillRoundRect(innerX, innerY, innerW, innerH, maxi16(4, innerH / 2), rgb(0, 1, 8));
-    frame.fillRoundRect(innerX + 8, innerY + innerH - maxi16(5, innerH / 4),
-                        innerW - 16, maxi16(4, innerH / 4), 4, lipLo);
-    drawMouthTeeth(innerX + 5, innerY + 3, innerW - 10, innerH, pose.teeth);
+  fillEllipse(frame, cx, cy, cavityW / 2, maxi16(3, cavityH / 2), cavity);
+  if (cavityH > 16) {
+    drawMouthTongue(cx, cy + cavityH / 3, cavityW / 4, maxi16(5, cavityH / 5));
   } else {
-    const int16_t lineY = cy - int16_t(pose.curve * 10.0f);
-    frame.drawFastHLine(innerX, lineY, innerW, rgb(0, 6, 22));
-    frame.drawFastHLine(innerX + 4, lineY + 1, innerW - 8, lipHi);
+    frame.drawFastHLine(cx - cavityW / 2 + 10, cy, cavityW - 20, rgb(28, 2, 12));
   }
 
-  const int16_t leftY = cy - int16_t(pose.curve * 18.0f) + int16_t(pose.skew * 8.0f);
-  const int16_t rightY = cy - int16_t(pose.curve * 18.0f) - int16_t(pose.skew * 8.0f);
-  frame.fillCircle(x + 5, leftY, 6, mixColor(lip, lipHi, 0.35f));
-  frame.fillCircle(x + w - 5, rightY, 6, mixColor(lip, lipHi, 0.22f));
-  frame.drawFastHLine(x + 18, y + 5, maxi16(8, w / 2), lipHi);
-  frame.drawFastHLine(cx - w / 5, y + h - 5, maxi16(8, w / 3), lipLo);
+  const float teethAmount = max(pose.teeth, pose.open > 0.34f ? clampf((pose.open - 0.30f) * 1.2f, 0.0f, 0.42f) : 0.0f);
+  drawMouthTeeth(cx - cavityW / 2 + 14, cy - cavityH / 2 + 2, cavityW - 28, cavityH, teethAmount);
+
+  const int16_t leftX = cx - w / 2;
+  const int16_t rightX = cx + w / 2;
+  frame.fillCircle(leftX, cornerY + int16_t(pose.skew * 10.0f), maxi16(8, lipH / 3), mixColor(lipLo, lip, 0.42f));
+  frame.fillCircle(rightX, cornerY - int16_t(pose.skew * 10.0f), maxi16(8, lipH / 3), mixColor(lipLo, lip, 0.48f));
+  frame.drawFastHLine(cx - cavityW / 2 + 12, topCy - lipH / 3, maxi16(20, cavityW / 3), lipHi);
+  frame.drawFastHLine(cx - cavityW / 4, bottomCy + lipH / 3, maxi16(20, cavityW / 2), lipLo);
 }
 
 void renderRobotMouth(MouthShape shape, uint32_t now) {
