@@ -2594,9 +2594,9 @@ bool jsonBool(JsonVariantConst value, bool defaultValue) {
 
 void loadSavedWifi(String &ssid, String &password) {
   Preferences preferences;
-  if (!preferences.begin("reachy-wifi", true)) return;
-  ssid = preferences.getString("ssid", "");
-  password = preferences.getString("password", "");
+  if (!preferences.begin("reachy-wifi", false)) return;
+  if (preferences.isKey("ssid")) ssid = preferences.getString("ssid", "");
+  if (preferences.isKey("password")) password = preferences.getString("password", "");
   preferences.end();
 }
 
@@ -3104,20 +3104,24 @@ void startConfigAccessPoint() {
 
 void setupWiFi() {
 #if REACHY_WIFI_ENABLED
+  Serial.println("WiFi setup starting.");
   String savedSsid;
   String savedPassword;
   loadSavedWifi(savedSsid, savedPassword);
   const char *stationSsid = savedSsid.length() > 0 ? savedSsid.c_str() : REACHY_WIFI_SSID;
   const char *stationPassword = savedSsid.length() > 0 ? savedPassword.c_str() : REACHY_WIFI_PASSWORD;
   bool accessPointStarted = false;
+  Serial.printf("WiFi station credentials: %s\n", strlen(stationSsid) > 0 ? "configured" : "not configured");
 
   if (strlen(stationSsid) > 0) {
 #if REACHY_AP_ALWAYS_ON
+    Serial.println("Starting AP+station mode.");
     WiFi.mode(WIFI_AP_STA);
     WiFi.setSleep(false);
     startConfigAccessPoint();
     accessPointStarted = true;
 #else
+    Serial.println("Starting station mode.");
     WiFi.mode(WIFI_STA);
 #endif
     WiFi.setHostname(REACHY_HOSTNAME);
