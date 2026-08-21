@@ -238,10 +238,10 @@ else if(b.id==="gazeCenter")await post("/gaze",{x:0,y:0,duration:number("gdur"),
 else if(b.id==="gazeAuto")await post("/gaze","auto");
 else if(b.id==="idleOn")await post("/control",{idle:true});
 else if(b.id==="idleOff")await post("/control",{idle:false});
-else if(b.id==="blink")await post("/blink",{});
-else if(b.id==="doubleBlink")await post("/blink",{double:true});
-else if(b.id==="winkL")await post("/wink",{eye:"left"});
-else if(b.id==="winkR")await post("/wink",{eye:"right"});
+else if(b.id==="blink")await post("/blink",{duration_ms:420});
+else if(b.id==="doubleBlink")await post("/blink",{double:true,duration_ms:260});
+else if(b.id==="winkL")await post("/wink",{eye:"left",duration_ms:650});
+else if(b.id==="winkR")await post("/wink",{eye:"right",duration_ms:650});
 else if(b.id==="sleep")await post("/sleep",{duration:0});
 else if(b.id==="release")await post("/release",{});
 else if(b.id==="flip")await post("/control",{flip:"toggle"});
@@ -2670,6 +2670,14 @@ void addState(JsonDocument &doc, uint32_t now) {
   gaze["target"]["x"] = gazeState.to.x;
   gaze["target"]["y"] = gazeState.to.y;
   gaze["target"]["z"] = gazeState.to.z;
+
+  JsonObject blink = doc["blink"].to<JsonObject>();
+  const uint32_t blinkUntil = blinkState.started + blinkState.duration + blinkState.leadMs;
+  blink["active"] = blinkState.active;
+  blink["wink"] = blinkState.active && blinkState.winkOnly;
+  blink["eye"] = blinkState.winkOnly ? (blinkState.winkLeft ? "left" : "right") : "both";
+  blink["duration_ms"] = blinkState.duration;
+  blink["remaining_ms"] = blinkState.active && !deadlineReached(now, blinkUntil) ? blinkUntil - now : 0;
 }
 
 void handleHttpState() {
