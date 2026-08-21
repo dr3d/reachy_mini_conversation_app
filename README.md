@@ -320,7 +320,7 @@ Mouth renderer styles:
 
 | Style | Basic look |
 |-------|------------|
-| `human` | Oversized warm red 790-style lips; corners may clip at the round display edge. |
+| `human` | Oversized blue glowing 790-style lips; corners may clip at the round display edge. |
 | `robot` | Simple cyan bar mouth for debugging or a more synthetic look. |
 
 Mouth shapes:

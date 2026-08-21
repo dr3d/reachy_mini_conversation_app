@@ -1798,8 +1798,8 @@ MouthShape activeMouthShape(uint32_t now) {
 void drawMouthTeeth(int16_t x, int16_t y, int16_t w, int16_t h, float amount) {
   if (amount <= 0.01f || h < 14 || w < 36) return;
   const int16_t teethH = int16_t(clampf(float(h) * (0.22f + amount * 0.18f), 4.0f, 18.0f));
-  const uint16_t enamel = rgb(238, 226, 206);
-  const uint16_t seam = rgb(118, 58, 64);
+  const uint16_t enamel = rgb(188, 220, 232);
+  const uint16_t seam = rgb(44, 82, 100);
   frame.fillRoundRect(x, y, w, teethH, 5, enamel);
   frame.drawFastHLine(x + 4, y + teethH - 1, w - 8, seam);
   for (int16_t tx = x + 18; tx < x + w - 10; tx += 18) {
@@ -1817,14 +1817,14 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   }
 
   frame.fillScreen(BLACK);
-  frame.fillRoundRect(8, 48, 224, 150, 48, rgb(3, 1, 3));
-  frame.fillRoundRect(17, 57, 206, 132, 42, rgb(18, 8, 12));
-  frame.drawRoundRect(18, 58, 204, 130, 41, rgb(48, 26, 34));
+  frame.fillRoundRect(8, 48, 224, 150, 48, rgb(1, 1, 4));
+  frame.fillRoundRect(17, 57, 206, 132, 42, rgb(12, 10, 17));
+  frame.drawRoundRect(18, 58, 204, 130, 41, rgb(35, 32, 44));
   frame.fillRoundRect(28, 76, 184, 94, 30, BLACK);
 
   if (shape == MouthShape::Sleep && !mouthState.talking) {
-    frame.fillRoundRect(61, 120, 118, 10, 5, rgb(126, 20, 42));
-    frame.drawFastHLine(73, 123, 94, rgb(248, 112, 132));
+    frame.fillRoundRect(61, 120, 118, 10, 5, rgb(20, 76, 140));
+    frame.drawFastHLine(73, 123, 94, rgb(90, 184, 244));
     return;
   }
 
@@ -1835,13 +1835,13 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   const int16_t x = cx - w / 2;
   const int16_t y = cy - h / 2;
   const int16_t r = maxi16(8, h / 2 + 5);
-  const uint16_t glowDeep = rgb(72, 0, 24);
-  const uint16_t glow = rgb(178, 18, 54);
-  const uint16_t lip = rgb(218, 46, 74);
-  const uint16_t lipHi = rgb(255, 126, 142);
-  const uint16_t lipLo = rgb(112, 8, 34);
+  const uint16_t glowDeep = rgb(0, 18, 70);
+  const uint16_t glow = rgb(8, 68, 176);
+  const uint16_t lip = rgb(38, 122, 238);
+  const uint16_t lipHi = rgb(118, 190, 255);
+  const uint16_t lipLo = rgb(10, 38, 128);
 
-  frame.fillRoundRect(x - 17, y - 15, w + 34, h + 30, r + 15, rgb(36, 0, 14));
+  frame.fillRoundRect(x - 17, y - 15, w + 34, h + 30, r + 15, rgb(0, 6, 28));
   frame.fillRoundRect(x - 9, y - 8, w + 18, h + 16, r + 8, glowDeep);
   frame.fillRoundRect(x - 3, y - 3, w + 6, h + 6, r + 3, glow);
   frame.fillRoundRect(x, y, w, h, r, lip);
