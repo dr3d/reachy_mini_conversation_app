@@ -1,8 +1,10 @@
 # Local Voice Bridge
 
-Sidecar prototype for running the Reachy Mini conversation app against a local LLM server without modifying the app.
+Experimental sidecar for running the Reachy Mini conversation app against a local LLM server without modifying
+the app.
 
-The delivered app already knows how to connect to an OpenAI-compatible realtime websocket at `HF_REALTIME_WS_URL`. This bridge provides that websocket and forwards language-model turns to LM Studio.
+The app already knows how to connect to an OpenAI-compatible realtime websocket at `HF_REALTIME_WS_URL`. This
+bridge provides that websocket and forwards language-model turns to LM Studio.
 
 ## What This Does
 
@@ -23,7 +25,9 @@ LM Studio is a good fit for the LLM part, but its documented API is not a full s
 
 This bridge includes a command-based STT hook and a command-based TTS hook. On Windows it can use SAPI for TTS automatically. STT must be configured with your preferred transcription command.
 
-Your LM Studio server may list ASR/TTS-looking models, but the bridge does not assume LM Studio can serve OpenAI audio endpoints. In this environment, `/v1/audio/transcriptions` and `/v1/audio/speech` did not behave as usable audio APIs, so STT/TTS stay as explicit adapters.
+Your LM Studio server may list ASR/TTS-looking models, but the bridge does not assume LM Studio can serve OpenAI
+audio endpoints. STT/TTS stay as explicit adapters so this sidecar remains independent of any one local audio
+stack.
 
 ## Install Bridge Dependencies
 
@@ -43,7 +47,8 @@ cd local_voice_bridge
 python server.py
 ```
 
-The bridge automatically loads `local_voice_bridge/.env` first. The checked-in example shows the available values; your local `.env` can hold the working Windows command paths.
+The bridge automatically loads `local_voice_bridge/.env` first. Start from `config.example.env`; your local
+`.env` can hold machine-specific command paths.
 
 ## Configure STT
 
@@ -71,11 +76,11 @@ This setup can use Piper directly:
 
 ```powershell
 $env:LOCAL_BRIDGE_TTS_PROVIDER = "piper"
-$env:LOCAL_BRIDGE_PIPER_EXE = "D:\_PROJECTS\reachy_mini_conversation_app\local_voice_bridge\piper\piper\piper.exe"
-$env:LOCAL_BRIDGE_PIPER_MODEL = "D:\_PROJECTS\reachy_mini_conversation_app\local_voice_bridge\piper\voices\en_US-lessac-high.onnx"
+$env:LOCAL_BRIDGE_PIPER_EXE = "local_voice_bridge\piper\piper\piper.exe"
+$env:LOCAL_BRIDGE_PIPER_MODEL = "local_voice_bridge\piper\voices\en_US-lessac-high.onnx"
 ```
 
-The local `.env` already points to the downloaded `en_US-lessac-high` voice.
+Your local `.env` can point to any downloaded Piper voice.
 
 On Windows, TTS falls back to SAPI if no provider is configured. For another TTS engine, set `LOCAL_BRIDGE_TTS_COMMAND` to a command that receives text and an output WAV path:
 
@@ -100,4 +105,4 @@ Then launch the app normally:
 reachy-mini-conversation-app --ui
 ```
 
-No delivered app code changes are required.
+No additional app code changes are required.

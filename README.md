@@ -25,7 +25,9 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the app](#running-the-app)
+- [Hardware extension sandboxes](#hardware-extension-sandboxes)
 - [Firmware sandbox](#firmware-sandbox)
+- [Local voice bridge](#local-voice-bridge)
 - [ESP32 eyes HTTP API](#esp32-eyes-http-api)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
 - [Creating and adding tools](#creating-and-adding-tools)
@@ -185,10 +187,18 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --ui
 ```
 
+## Hardware extension sandboxes
+
+Hardware experiments that are useful with this app but not part of the core Reachy Mini SDK live in contained
+subdirectories. Keep these integrations optional, documented through examples, and wired into the app through
+stable runtime interfaces so additional devices such as displays, bases, or chassis controllers can evolve
+without becoming required dependencies.
+
 ## Firmware sandbox
 
 `firmware/esp32-eyes/` contains the ESP32-S3 eye-display firmware imported from the sibling
 `reachy_eyes/esp32-eyes` project so it can evolve alongside the conversation app integration work.
+This is an experimental hardware sandbox, not required for the default conversation app.
 
 The firmware drives two 240x240 GC9A01 round eye displays plus an optional third mouth display, and renders
 gaze, blinks, moods, mouth shapes, sleep, idle beats, brightness, and flipped orientation on-device. Build and
@@ -222,6 +232,12 @@ Current ESP32-S3 display pins are defined in `firmware/esp32-eyes/include/reachy
 layout shares GPIO4/5/6/7 for SCLK/MOSI/DC/RST, with GPIO15/16/17 reserved for left-eye/right-eye/mouth CS.
 The firmware owns animation timing, so the conversation app sends high-level HTTP intents rather than streaming
 frames.
+
+## Local voice bridge
+
+`local_voice_bridge/` is an experimental sidecar for running the app against a local OpenAI-compatible realtime
+websocket backed by LM Studio plus explicit STT/TTS adapters. It is useful for local voice experiments, but it is
+not required for the default Hugging Face realtime backend. See `local_voice_bridge/README.md` for setup details.
 
 ## ESP32 eyes HTTP API
 
