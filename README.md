@@ -224,10 +224,11 @@ the built-in test panel, then the board reboots and joins your network while the
 compile-time credentials instead, copy `firmware/esp32-eyes/include/reachy_config_private.example.h` to
 `firmware/esp32-eyes/include/reachy_config_private.h`, fill in `REACHY_WIFI_SSID` and
 `REACHY_WIFI_PASSWORD`, then rebuild and flash. The private header is ignored by git.
+After the first USB flash, the same test panel can upload future PlatformIO `firmware.bin` builds over Wi-Fi.
 
 The app uses `GET /state`, `/moods`, `/emotions`, `/beats`, `/styles`, `/mouth_shapes`, and `/mouth_styles`
 plus `POST /control`, `/release`, `/mood`, `/emotion`, `/expression`, `/beat`, `/style`, `/mouth`, `/gaze`,
-`/blink`, `/wink`, and `/sleep` for high-level cues. The HTTP API is layered onto the same full
+`/blink`, `/wink`, `/sleep`, and `/ota` for high-level cues and firmware updates. The HTTP API is layered onto the same full
 mood/gaze/blink/beat/style/mouth implementation as the USB serial commands.
 Current ESP32-S3 display pins are defined in `firmware/esp32-eyes/include/reachy_config.h`. The three-display
 layout shares GPIO4/5/6/7 for SCLK/MOSI/DC/RST, with GPIO15/16/17 reserved for left-eye/right-eye/mouth CS.

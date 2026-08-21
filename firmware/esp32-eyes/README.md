@@ -62,6 +62,22 @@ http://192.168.4.1/
 
 The built-in panel controls eye style, mood/expression, idle beats, mouth style/shape/talking energy, gaze, blink/wink, sleep, release, brightness, and display flip.
 
+## OTA Firmware Updates
+
+After one USB flash of an OTA-capable build, future firmware updates can be uploaded from the browser test panel. Build the firmware:
+
+```bash
+pio run
+```
+
+Then open the board URL, use the **OTA Firmware** card, and upload:
+
+```text
+.pio/build/esp32-s3-devkitc-1/firmware.bin
+```
+
+The board reboots after a successful upload. Keep USB flashing available as a fallback, and do not upload `bootloader.bin` or `partitions.bin` through this panel.
+
 ## HTTP API
 
 Useful read endpoints:

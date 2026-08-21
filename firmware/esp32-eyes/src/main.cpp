@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Update.h>
 #include <ArduinoJson.h>
 #include <Adafruit_GC9A01A.h>
 #include <Adafruit_GFX.h>
@@ -207,6 +208,11 @@ select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(
 </div>
 </div>
 <div class="card">
+<h2>OTA Firmware</h2>
+<div class="row"><label for="otaFile">Firmware .bin</label><input id="otaFile" type="file" accept=".bin,application/octet-stream"></div>
+<div class="actions"><button class="warn" id="otaUpload">Upload & Reboot</button></div>
+</div>
+<div class="card">
 <h2>Status</h2>
 <div id="status" class="status">loading...</div>
 <div class="actions"><button id="refresh">Refresh</button></div>
@@ -222,6 +228,7 @@ async function post(path,payload={}){const r=await fetch(path,{method:"POST",hea
 function number(id){return Number($(id).value)}
 function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const wifi=j.wifi||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("bright").value=j.brightness_percent??$("bright").value;$("wifiStatus").textContent=(wifi.mode||"?")+" "+(wifi.ip||"")+" "+(wifi.saved_credentials?"saved":"")}
 async function refresh(){try{const r=await fetch("/state");render(await r.json())}catch(e){$("dot").className="dot bad";$("summary").textContent=e.message;$("status").textContent=e.stack||e.message}}
+async function uploadOta(){const file=$("otaFile").files[0];if(!file)throw new Error("choose a firmware .bin first");$("summary").textContent="uploading firmware...";const data=new FormData();data.append("firmware",file,file.name);const r=await fetch("/ota",{method:"POST",body:data});const j=await r.json().catch(()=>({ok:false,error:"bad json"}));if(!r.ok||j.ok===false)throw new Error(j.error||r.statusText);render(j);return j}
 function payloadFromButton(b){const p={};if(b.dataset.select)p[b.dataset.key||"name"]=$(b.dataset.select).value;if(b.dataset.duration)p.duration=number(b.dataset.duration);return p}
 document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;try{
 if(b.dataset.post){await post(b.dataset.post,payloadFromButton(b));return}
@@ -244,6 +251,7 @@ else if(b.id==="brightApply")await post("/control",{brightness_percent:number("b
 else if(b.id==="flip")await post("/control",{flip:"toggle"});
 else if(b.id==="wifiSave")await post("/wifi",{ssid:$("ssid").value,password:$("wifiPass").value});
 else if(b.id==="wifiClear")await post("/wifi",{clear:true});
+else if(b.id==="otaUpload")await uploadOta();
 else if(b.id==="refresh")await refresh();
 }catch(err){$("dot").className="dot bad";$("summary").textContent=err.message;$("status").textContent=err.stack||err.message}});
 async function init(){await Promise.all([values("/styles","styles","style"),values("/moods","moods","mood"),values("/beats","beats","beat"),values("/mouth_styles","mouth_styles","mouthStyle"),values("/mouth_shapes","mouth_shapes","mouthShape")]);await refresh();setInterval(refresh,2500)}
@@ -835,6 +843,10 @@ float pupilRadius = 16.0f;
 uint32_t lastFrame = 0;
 uint32_t lastUpdate = 0;
 uint32_t restartAt = 0;
+bool otaActive = false;
+bool otaSucceeded = false;
+size_t otaBytes = 0;
+char otaMessage[128] = "idle";
 
 Vec3 pickGazeTarget(Mood mood) {
   switch (mood) {
@@ -2730,6 +2742,80 @@ void handleHttpWifi() {
   sendJson(doc);
 }
 
+void handleHttpOtaUpload() {
+  HTTPUpload &upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    otaActive = Update.begin(UPDATE_SIZE_UNKNOWN);
+    otaSucceeded = false;
+    otaBytes = 0;
+    snprintf(otaMessage, sizeof(otaMessage), "starting ota upload");
+    Serial.printf("OTA upload start: %s\n", upload.filename.c_str());
+    if (!otaActive) {
+      snprintf(otaMessage, sizeof(otaMessage), "ota update could not start");
+      Update.printError(Serial);
+    }
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!otaActive) return;
+    const size_t written = Update.write(upload.buf, upload.currentSize);
+    otaBytes += written;
+    if (written != upload.currentSize) {
+      otaActive = false;
+      snprintf(otaMessage, sizeof(otaMessage), "ota write failed after %u bytes", unsigned(otaBytes));
+      Update.printError(Serial);
+      Update.abort();
+    }
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_END) {
+    if (otaActive && Update.end(true)) {
+      otaActive = false;
+      otaSucceeded = true;
+      snprintf(otaMessage, sizeof(otaMessage), "ota update complete; rebooting");
+      Serial.printf("OTA upload complete: %u bytes\n", unsigned(otaBytes));
+      restartAt = millis() + 900;
+      return;
+    }
+    if (otaActive) {
+      Update.printError(Serial);
+      Update.abort();
+    }
+    otaActive = false;
+    snprintf(otaMessage, sizeof(otaMessage), "ota update failed");
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_ABORTED) {
+    if (otaActive) Update.abort();
+    otaActive = false;
+    otaSucceeded = false;
+    snprintf(otaMessage, sizeof(otaMessage), "ota upload aborted");
+    Serial.println("OTA upload aborted");
+  }
+}
+
+void handleHttpOtaDone() {
+  JsonDocument doc;
+  addState(doc, millis());
+  JsonObject ota = doc["ota"].to<JsonObject>();
+  ota["bytes"] = otaBytes;
+  ota["message"] = otaMessage;
+  ota["rebooting"] = otaSucceeded;
+  if (otaSucceeded) {
+    doc["message"] = otaMessage;
+    doc["restart_scheduled"] = true;
+    sendJson(doc);
+    return;
+  }
+
+  doc["ok"] = false;
+  doc["error"] = otaMessage;
+  sendJson(doc, 500);
+}
+
 void listValues(const char *key, const char *const *values, size_t count) {
   JsonDocument doc;
   doc["ok"] = true;
@@ -3079,6 +3165,7 @@ void setupHttpRoutes() {
   server.on("/wink", HTTP_POST, handleHttpWinkEndpoint);
   server.on("/sleep", HTTP_POST, handleHttpSleepEndpoint);
   server.on("/wifi", HTTP_POST, handleHttpWifi);
+  server.on("/ota", HTTP_POST, handleHttpOtaDone, handleHttpOtaUpload);
 
   server.onNotFound([] {
     if (server.method() == HTTP_OPTIONS) {
