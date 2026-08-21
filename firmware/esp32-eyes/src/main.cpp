@@ -2042,13 +2042,15 @@ void renderRobotMouth(MouthShape shape, uint32_t now) {
   const MouthPose pose = mouthPoseFor(shape);
   const float beat = mouthState.talking ? clampf(0.5f + 0.5f * sinf(float(now) * 0.05f), 0.0f, 1.0f) : pose.open;
   frame.fillScreen(BLACK);
-  frame.fillRoundRect(36, 80, 168, 80, 18, rgb(0, 8, 16));
-  frame.drawRoundRect(37, 81, 166, 78, 17, rgb(30, 118, 132));
-  for (uint8_t i = 0; i < 9; ++i) {
-    const int16_t x = 55 + int16_t(i) * 15;
+  frame.fillRoundRect(8, 54, 224, 132, 34, rgb(0, 8, 16));
+  frame.drawRoundRect(9, 55, 222, 130, 33, rgb(30, 118, 132));
+  frame.drawRoundRect(15, 61, 210, 118, 28, rgb(12, 58, 78));
+  for (uint8_t i = 0; i < 11; ++i) {
+    const int16_t x = 28 + int16_t(i) * 18;
     const float wave = 0.35f + 0.65f * fabsf(sinf(float(now) * 0.009f + float(i) * 0.8f));
-    const int16_t barH = int16_t(8.0f + 42.0f * max(beat, pose.open) * wave);
-    frame.fillRoundRect(x, 120 - barH / 2, 9, barH, 4, rgb(44, 220, 232));
+    const int16_t barH = int16_t(12.0f + 80.0f * max(beat, pose.open) * wave);
+    frame.fillRoundRect(x, 120 - barH / 2, 12, barH, 6, rgb(44, 220, 232));
+    frame.drawFastVLine(x + 4, 120 - barH / 2 + 5, maxi16(1, barH - 10), rgb(132, 248, 255));
   }
 }
 
