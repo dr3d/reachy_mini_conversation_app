@@ -1,6 +1,6 @@
 # ESP32 Eyes Firmware
 
-Experimental ESP32-S3 firmware for Reachy Mini face displays. It drives two 240x240 GC9A01 round eye screens plus an optional third mouth screen, with gaze, blinks, moods, idle beats, mouth shapes, brightness, display flip, USB serial commands, and an HTTP API.
+Experimental ESP32-S3 firmware for Reachy Mini face displays. It drives two 240x240 GC9A01 round eye screens plus an optional third mouth screen, with gaze, blinks, moods, idle beats, mouth shapes, display flip, USB serial commands, and an HTTP API.
 
 ## Build And Flash
 
@@ -58,7 +58,7 @@ or, on the default access point:
 http://192.168.4.1/
 ```
 
-The built-in panel controls eye style, mood/expression, idle beats, mouth style/shape/talking energy, gaze, blink/wink, sleep, release, brightness, and display flip.
+The built-in panel controls eye style, mood/expression, idle beats, mouth style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip.
 
 ## OTA Firmware Updates
 

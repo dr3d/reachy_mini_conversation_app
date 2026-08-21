@@ -201,7 +201,7 @@ without becoming required dependencies.
 This is an experimental hardware sandbox, not required for the default conversation app.
 
 The firmware drives two 240x240 GC9A01 round eye displays plus an optional third mouth display, and renders
-gaze, blinks, moods, mouth shapes, sleep, idle beats, brightness, and flipped orientation on-device. Build and
+gaze, blinks, moods, mouth shapes, sleep, idle beats, and flipped orientation on-device. Build and
 upload it with PlatformIO:
 
 ```bash
@@ -244,12 +244,12 @@ not required for the default Hugging Face realtime backend. See `local_voice_bri
 ## ESP32 eyes HTTP API
 
 The ESP32 eyes API is intentionally high-level. The app sends semantic cues over HTTP; the firmware owns
-rendering, easing, blinking, idle beats, gaze projection, brightness, and display orientation. Query these
+rendering, easing, blinking, idle beats, gaze projection, and display orientation. Query these
 endpoints on a running board to get the firmware's current value lists:
 
 Open the board root URL in a browser, such as `http://reachyeyes-s3.local/` or `http://192.168.4.1/`, for a
 small built-in test panel. It gives direct controls for eye style, mood/expression, idle beats, mouth
-style/shape/talking energy, gaze, blink/wink, sleep, release, brightness, and display flip.
+style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip.
 
 ```bash
 EYES_URL=http://reachyeyes-s3.local
@@ -386,7 +386,6 @@ Other control fields:
 |----------------|--------|
 | `POST /blink` or `/control` with `blink=true` | Trigger blink. |
 | `POST /wink` or `/control` with `wink=true` | Trigger wink; optional `eye` can select `left` or `right`. |
-| `brightness` / `brightness_percent` | Set display brightness. `brightness` may be `0.0..1.0`. |
 | `flip` | Flip display orientation; `"toggle"` is accepted by `/control`. |
 | `idle` / `autonomous` | Re-enable or disable autonomous firmware idle behavior. |
 | `release` or `POST /release` | Clear app/manual overrides and return to firmware idle behavior. |

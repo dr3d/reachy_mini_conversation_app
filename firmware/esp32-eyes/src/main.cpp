@@ -29,7 +29,6 @@ constexpr uint8_t LEFT_ROTATION = 2;
 constexpr uint8_t RIGHT_ROTATION = 2;
 constexpr uint8_t MOUTH_ROTATION = 2;
 constexpr bool DISPLAY_INVERT = true;
-constexpr uint8_t DISPLAY_BRIGHTNESS_PERCENT = 90;
 constexpr uint8_t API_LINE_MAX = 96;
 constexpr uint32_t API_DEFAULT_MOOD_MS = 3500;
 constexpr uint32_t API_DEFAULT_EXPR_MS = 8000;
@@ -191,9 +190,7 @@ select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(
 </div>
 <div class="card">
 <h2>Display</h2>
-<div class="row"><label for="bright">Brightness</label><input id="bright" type="range" min="0" max="100" step="1" value="90"></div>
 <div class="actions">
-<button class="primary" id="brightApply">Apply</button>
 <button id="flip">Flip</button>
 </div>
 </div>
@@ -226,7 +223,7 @@ function fill(id,values){$(id).innerHTML=values.map(v=>'<option value="'+v+'">'+
 async function values(path,key,id){try{const r=await fetch(path);const j=await r.json();fill(id,j[key]||fallback[id])}catch(e){fill(id,fallback[id])}}
 async function post(path,payload={}){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json().catch(()=>({ok:false,error:"bad json"}));if(!r.ok||j.ok===false)throw new Error(j.error||r.statusText);render(j);return j}
 function number(id){return Number($(id).value)}
-function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const wifi=j.wifi||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("bright").value=j.brightness_percent??$("bright").value;$("wifiStatus").textContent=(wifi.mode||"?")+" "+(wifi.ip||"")+" "+(wifi.saved_credentials?"saved":"")}
+function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const wifi=j.wifi||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("wifiStatus").textContent=(wifi.mode||"?")+" "+(wifi.ip||"")+" "+(wifi.saved_credentials?"saved":"")}
 async function refresh(){try{const r=await fetch("/state");render(await r.json())}catch(e){$("dot").className="dot bad";$("summary").textContent=e.message;$("status").textContent=e.stack||e.message}}
 async function uploadOta(){const file=$("otaFile").files[0];if(!file)throw new Error("choose a firmware .bin first");$("summary").textContent="uploading firmware...";const data=new FormData();data.append("firmware",file,file.name);const r=await fetch("/ota",{method:"POST",body:data});const j=await r.json().catch(()=>({ok:false,error:"bad json"}));if(!r.ok||j.ok===false)throw new Error(j.error||r.statusText);render(j);return j}
 function payloadFromButton(b){const p={};if(b.dataset.select)p[b.dataset.key||"name"]=$(b.dataset.select).value;if(b.dataset.duration)p.duration=number(b.dataset.duration);return p}
@@ -247,7 +244,6 @@ else if(b.id==="winkL")await post("/wink",{eye:"left"});
 else if(b.id==="winkR")await post("/wink",{eye:"right"});
 else if(b.id==="sleep")await post("/sleep",{duration:0});
 else if(b.id==="release")await post("/release",{});
-else if(b.id==="brightApply")await post("/control",{brightness_percent:number("bright")});
 else if(b.id==="flip")await post("/control",{flip:"toggle"});
 else if(b.id==="wifiSave")await post("/wifi",{ssid:$("ssid").value,password:$("wifiPass").value});
 else if(b.id==="wifiClear")await post("/wifi",{clear:true});
@@ -783,7 +779,6 @@ struct ApiState {
   bool eyesFlipped = false;
   char line[API_LINE_MAX] = {};
   uint8_t lineLen = 0;
-  uint8_t brightnessPercent = DISPLAY_BRIGHTNESS_PERCENT;
 };
 
 struct MouthState {
@@ -2057,27 +2052,6 @@ void pushFrame(Adafruit_GC9A01A &tft) {
   tft.drawRGBBitmap(0, 0, frame.getBuffer(), SCREEN_W, SCREEN_H);
 }
 
-uint8_t brightnessByte(uint8_t percent) {
-  percent = constrain(percent, 0, 100);
-  return uint8_t((uint16_t(percent) * 255U + 50U) / 100U);
-}
-
-void setDisplayBrightness(Adafruit_GC9A01A &tft, uint8_t percent) {
-  uint8_t ctrl = 0x2C;
-  uint8_t level = brightnessByte(percent);
-  tft.sendCommand(GC9A01A_SETCTRL, &ctrl, 1);
-  tft.sendCommand(GC9A01A_SETBRIGHT, &level, 1);
-}
-
-void applyDisplayBrightness(uint8_t percent) {
-  apiState.brightnessPercent = constrain(percent, 0, 100);
-  setDisplayBrightness(leftTft, apiState.brightnessPercent);
-  setDisplayBrightness(rightTft, apiState.brightnessPercent);
-#if REACHY_HAS_MOUTH
-  setDisplayBrightness(mouthTft, apiState.brightnessPercent);
-#endif
-}
-
 uint8_t flippedRotation(uint8_t rotation) {
   return uint8_t((rotation + 2) & 0x03);
 }
@@ -2102,7 +2076,6 @@ void initDisplay(Adafruit_GC9A01A &tft, uint8_t rotation) {
   tft.begin(SPI_HZ);
   tft.setRotation(rotation);
   tft.invertDisplay(DISPLAY_INVERT);
-  setDisplayBrightness(tft, apiState.brightnessPercent);
   tft.fillScreen(BLACK);
 }
 
@@ -2182,7 +2155,6 @@ void printApiHelp() {
   Serial.println("  wink [left|right]");
   Serial.println("  flip [on|off|toggle]");
   Serial.println("  idle <on|off>");
-  Serial.println("  brightness <0-100>");
   Serial.println("  status");
   Serial.println("  release");
 }
@@ -2195,11 +2167,10 @@ void printApiStatus(uint32_t now) {
                 apiState.moodOverride ? "on" : "off",
                 apiState.gazeOverride ? "on" : "off",
                 apiState.eyesFlipped ? "on" : "off");
-  Serial.printf("director=%s gaze_now=%.1f,%.1f,%.1f gaze_to=%.1f,%.1f,%.1f brightness=%u\n",
+  Serial.printf("director=%s gaze_now=%.1f,%.1f,%.1f gaze_to=%.1f,%.1f,%.1f\n",
                 idleBeatName(idleDirector.beat),
                 gazeState.now.x, gazeState.now.y, gazeState.now.z,
-                gazeState.to.x, gazeState.to.y, gazeState.to.z,
-                apiState.brightnessPercent);
+                gazeState.to.x, gazeState.to.y, gazeState.to.z);
   Serial.printf("OK mouth style=%s shape=%s override=%s talking=%s energy=%.2f\n",
                 mouthStyleName(mouthState.style),
                 mouthShapeName(activeMouthShape(now)),
@@ -2531,18 +2502,6 @@ void handleApiLine(char *line) {
     return;
   }
 
-  if (equalsIgnoreCase(cmd, "brightness") || equalsIgnoreCase(cmd, "bright")) {
-    uint32_t percent = 0;
-    char *arg = strtok(nullptr, " \t,");
-    if (!parseUint32Token(arg, percent) || percent > 100) {
-      Serial.println("ERR brightness expected 0-100");
-      return;
-    }
-    applyDisplayBrightness(uint8_t(percent));
-    Serial.printf("OK brightness %u\n", apiState.brightnessPercent);
-    return;
-  }
-
   Serial.println("ERR unknown command");
 }
 
@@ -2655,8 +2614,6 @@ void addState(JsonDocument &doc, uint32_t now) {
   doc["flip"] = apiState.eyesFlipped;
   doc["sleeping"] = currentMood(now) == Mood::Sleep;
   doc["director"] = idleBeatName(idleDirector.beat);
-  doc["brightness_percent"] = apiState.brightnessPercent;
-  doc["brightness"] = float(apiState.brightnessPercent) / 100.0f;
 
   JsonObject wifi = doc["wifi"].to<JsonObject>();
   const bool stationConnected = WiFi.status() == WL_CONNECTED;
@@ -2990,13 +2947,6 @@ void handleHttpWink(JsonDocument &doc, uint32_t now) {
   triggerWink(now, left, jsonMs(doc["duration_ms"], jsonMs(doc["duration"], 280)));
 }
 
-void handleHttpBrightness(JsonVariantConst value) {
-  if (value.isNull()) return;
-  float brightness = value.as<float>();
-  if (brightness <= 1.0f) brightness *= 100.0f;
-  applyDisplayBrightness(uint8_t(constrain(uint32_t(brightness + 0.5f), 0UL, 100UL)));
-}
-
 void handleHttpFlip(JsonVariantConst value) {
   if (value.isNull()) return;
   if (value.is<const char *>() && equalsIgnoreCase(value.as<const char *>(), "toggle")) {
@@ -3036,8 +2986,6 @@ void handleHttpControl() {
     if (!handleHttpMouth(doc["mouth"], doc["duration"], now)) return;
   }
   if (!doc["gaze"].isNull()) handleHttpGaze(doc["gaze"], doc["duration"], now);
-  if (!doc["brightness"].isNull()) handleHttpBrightness(doc["brightness"]);
-  if (!doc["brightness_percent"].isNull()) handleHttpBrightness(doc["brightness_percent"]);
   if (!doc["flip"].isNull()) handleHttpFlip(doc["flip"]);
   if (jsonBool(doc["blink"], false)) handleHttpBlink(doc, now);
   if (jsonBool(doc["wink"], false)) handleHttpWink(doc, now);
