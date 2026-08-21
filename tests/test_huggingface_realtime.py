@@ -216,6 +216,52 @@ async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> 
     assert create.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_speech_started_during_assistant_playback_does_not_flush(monkeypatch: Any) -> None:
+    """Echo-triggered VAD should not clear queued assistant audio."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
+    monkeypatch.setattr(hf_mod, "get_session_greeting_prompt", lambda: "")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    clear_queue = MagicMock()
+    handler._clear_queue = clear_queue
+    handler._playback_active = lambda: True
+    handler.client = _make_fake_realtime_client(events=(_FakeEvent("input_audio_buffer.speech_started"),))
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    clear_queue.assert_not_called()
+    movement_manager.set_listening.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_speech_started_without_assistant_playback_flushes(monkeypatch: Any) -> None:
+    """Normal user speech should still clear stale playback and enter listening."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
+    monkeypatch.setattr(hf_mod, "get_session_greeting_prompt", lambda: "")
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+
+    movement_manager = MagicMock()
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=movement_manager))
+    clear_queue = MagicMock()
+    handler._clear_queue = clear_queue
+    handler._playback_active = lambda: False
+    handler.client = _make_fake_realtime_client(events=(_FakeEvent("input_audio_buffer.speech_started"),))
+    monkeypatch.setattr(type(handler.tool_manager), "start_up", MagicMock())
+    monkeypatch.setattr(type(handler.tool_manager), "shutdown", AsyncMock())
+
+    await handler._run_realtime_session()
+
+    clear_queue.assert_called_once()
+    movement_manager.set_listening.assert_called_once_with(True)
+
+
 def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
     """Hugging Face startup should restore persisted HF voices."""
     handler = HuggingFaceRealtimeHandler(
@@ -224,6 +270,192 @@ def test_handler_uses_hf_startup_voice_at_startup(monkeypatch: Any) -> None:
     )
 
     assert handler.get_current_voice() == "Aiden"
+
+
+def test_manual_eye_holdoff_skips_automatic_cues() -> None:
+    """Explicit set_eyes calls should not be immediately undone by automatic cues."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._hold_automatic_eye_cues()
+    handler._cue_eyes("release")
+
+    eyes_controller.cue.assert_not_called()
+
+
+def test_automatic_eye_cues_resume_after_holdoff() -> None:
+    """Automatic cues should resume after the manual eye-control window expires."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+    handler._manual_eye_cue_holdoff_until = time.monotonic() - 1.0
+
+    handler._cue_eyes("release")
+
+    eyes_controller.cue.assert_called_once_with("release", None)
+
+
+@pytest.mark.asyncio
+async def test_sweep_tool_eye_cue_holdoff_skips_automatic_release() -> None:
+    """Sweep eye choreography should not be immediately cancelled by response release."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_sweep",
+            tool_name="sweep_look",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"status": "sweeping look left-right-center, total 14.0s"},
+        )
+    )
+    handler._cue_eyes("release")
+
+    eyes_controller.cue.assert_not_called()
+
+
+def test_transcript_eye_expression_request_cues_controller() -> None:
+    """Obvious spoken eye-expression requests should work without model tool choice."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("I want you to look suspicious.")
+    handler._cue_eyes("release")
+
+    eyes_controller.cue.assert_called_once_with("expression", {"name": "suspicious", "duration": 6.0})
+
+
+def test_transcript_without_eye_intent_does_not_cue_controller() -> None:
+    """Eye expression words in ordinary speech should not become hardware commands."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("That seems suspicious.")
+
+    eyes_controller.cue.assert_not_called()
+
+
+def test_transcript_eye_gaze_request_cues_controller() -> None:
+    """Simple spoken gaze requests should map to normalized eye API coordinates."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("Aim your eyes up and left.")
+
+    eyes_controller.cue.assert_called_once_with(
+        "control",
+        {"gaze": {"x": -0.8, "y": -0.45, "duration": 5.0, "move_ms": 250}},
+    )
+
+
+def test_transcript_full_range_eye_gaze_request_cues_controller() -> None:
+    """Full-range gaze phrases should use the edge of the normalized API."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("Aim your gaze all the way to the right.")
+
+    eyes_controller.cue.assert_called_once_with(
+        "control",
+        {"gaze": {"x": 1.0, "y": 0.0, "duration": 5.0, "move_ms": 250}},
+    )
+
+
+def test_transcript_eye_style_request_cues_controller() -> None:
+    """Simple spoken eye-style requests should map aliases to firmware styles."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("Switch your eye style to big dot.")
+
+    eyes_controller.cue.assert_called_once_with("style", {"name": "robot"})
+
+
+def test_transcript_eye_style_asr_alias_cues_controller() -> None:
+    """Likely ASR mistakes in eye-style requests should map to intended styles."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript("Can you set your eye style to row body?")
+
+    eyes_controller.cue.assert_called_once_with("style", {"name": "robot"})
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "Okay, now make them look sinister.",
+        "Can you make them slits?",
+    ],
+)
+def test_transcript_sinister_eye_style_requests_cue_controller(transcript: str) -> None:
+    """Sinister/slit phrasing should map to the slit renderer style."""
+    eyes_controller = MagicMock()
+    handler = HuggingFaceRealtimeHandler(
+        ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=eyes_controller,
+        )
+    )
+
+    handler._cue_eyes_from_transcript(transcript)
+
+    eyes_controller.cue.assert_called_once_with("style", {"name": "sinister"})
 
 
 def test_handler_ignores_unsupported_hf_profile_voice(monkeypatch: Any) -> None:
@@ -264,6 +496,7 @@ async def test_run_realtime_session_uses_default_voice_for_lb_allocated_sessions
     # HF at 16 kHz passes None so the backend uses its optimal default (16 kHz).
     assert session["audio"]["input"]["format"]["rate"] is None
     assert session["audio"]["output"]["format"]["rate"] is None
+    assert session["audio"]["input"]["turn_detection"]["interrupt_response"] is False
     assert session["audio"]["input"]["transcription"]["language"] == "en"
     assert session["audio"]["output"]["voice"] == HF_DEFAULT_VOICE
 

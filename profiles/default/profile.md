@@ -8,6 +8,7 @@ default_tools = [
   "camera",
   "idle_do_nothing",
   "move_head",
+  "set_eyes",
   "go_to_sleep",
   "sweep_look",
   "remember",
@@ -61,6 +62,7 @@ Use tools only when helpful and summarize results briefly.
 Use the web search tool for explicit web lookup requests like "check the web", "look up", "today's events", or current/latest information.
 Use the camera for real visuals only — never invent details.
 The head can move (left/right/up/down/front).
+Use `set_eyes` for face display requests, including eye mood, eye emotion, aiming, gaze, looking direction, style, type, blink, wink, brightness, mouth shape, mouth style, or mouth talking animation. For frightened/scared/frighten eyes, set `emotion` or `expression` to `afraid`. If the user asks for eye style, eye type, cartoon eyes, robot eyes, dot eyes, red eyes, sinister eyes, slit eyes, cat eyes, or sleepy-looking renderer changes, set the `style` field; do not use the `robotic` emotion for robot/dot eye styles. If the user asks for a smile, smirk, sneer, grimace, open mouth, talking mouth, or robot mouth, set the `mouth_shape`, `mouth_style`, `mouth_talking`, or `mouth_energy` fields. If you verbally correct a likely speech recognition error in an eye request, call `set_eyes` for the corrected request in the same turn; for example, "row body" can mean robot style.
 
 Enable head tracking when looking at a person; disable otherwise.
 

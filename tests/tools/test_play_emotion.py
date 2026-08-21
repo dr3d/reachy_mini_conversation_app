@@ -8,6 +8,7 @@ from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.play_emotion import (
     EMOTION_INTENTS,
     PlayEmotion,
+    resolve_eye_emotion,
     resolve_emotion_name,
     random_curated_emotion,
 )
@@ -162,6 +163,20 @@ def test_random_curated_emotion_falls_back_when_no_curated_moves(monkeypatch: py
     assert choices_seen == ["cheerful1"]
 
 
+@pytest.mark.parametrize(
+    ("requested", "resolved_move", "expected"),
+    [
+        ("thinking", "thoughtful1", "curious"),
+        ("no firm", "no1", "angry"),
+        ("contento", "confused1", "confused"),
+        ("random", "laughing2", "happy"),
+    ],
+)
+def test_resolve_eye_emotion_maps_body_emotions(requested: str, resolved_move: str, expected: str) -> None:
+    """Body emotion intents should resolve to compact eye API emotions."""
+    assert resolve_eye_emotion(requested, resolved_move) == expected
+
+
 @pytest.mark.asyncio
 async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tool should queue the resolved recorded-move ID."""
@@ -188,6 +203,38 @@ async def test_play_emotion_queues_resolved_emotion(monkeypatch: pytest.MonkeyPa
     assert result == {"status": "queued", "emotion": "no_sad1"}
     queued_move = movement_manager.queue_move.call_args.args[0]
     assert queued_move.emotion_name == "no_sad1"
+
+
+@pytest.mark.asyncio
+async def test_play_emotion_cues_matching_eye_emotion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queued body emotions should cue the optional eye controller."""
+
+    class FakeRecordedMoves:
+        def list_moves(self) -> list[str]:
+            return AVAILABLE_EMOTIONS
+
+    class FakeEmotionQueueMove:
+        def __init__(self, emotion_name: str, recorded_moves: FakeRecordedMoves) -> None:
+            self.emotion_name = emotion_name
+            self.recorded_moves = recorded_moves
+
+    monkeypatch.setattr(play_emotion_module, "EMOTION_AVAILABLE", True)
+    monkeypatch.setattr(play_emotion_module, "EmotionQueueMove", FakeEmotionQueueMove)
+
+    movement_manager = MagicMock()
+    eyes_controller = MagicMock()
+    deps = ToolDependencies(
+        reachy_mini=MagicMock(),
+        movement_manager=movement_manager,
+        eyes_controller=eyes_controller,
+    )
+
+    tool = PlayEmotion()
+    monkeypatch.setattr(tool, "_library", FakeRecordedMoves())
+    result = await tool(deps, emotion="sad no")
+
+    assert result == {"status": "queued", "emotion": "no_sad1"}
+    eyes_controller.cue.assert_called_once_with("emotion", {"name": "afraid"})
 
 
 @pytest.mark.asyncio

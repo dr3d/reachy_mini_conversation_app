@@ -89,6 +89,8 @@ def run(
     from reachy_mini_conversation_app.config import (
         HF_LOCAL_CONNECTION_MODE,
         set_instance_path,
+        get_esp32_eyes_base_url,
+        get_esp32_eyes_timeout_s,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
@@ -156,12 +158,26 @@ def run(
     app_lifecycle.wake_up_if_sleeping(robot, logger)
 
     movement_manager = MovementManager(current_robot=robot)
+    eyes_controller = None
+    eyes_base_url = get_esp32_eyes_base_url()
+    if eyes_base_url is not None:
+        from reachy_mini_conversation_app.eyes import HttpEyesClient, HttpEyesSettings
+
+        eyes_controller = HttpEyesClient(
+            HttpEyesSettings(
+                base_url=eyes_base_url,
+                timeout_s=get_esp32_eyes_timeout_s(),
+            )
+        )
+        logger.info("ESP32 eyes HTTP integration enabled at %s", eyes_base_url)
+        eyes_controller.cue("release")
 
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_enabled=not args.no_camera,
+        eyes_controller=eyes_controller,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -225,6 +241,8 @@ def run(
 
             logger.info("Going to sleep before stopping conversation app.")
             sleep_error: str | None = None
+            if deps.eyes_controller is not None:
+                deps.eyes_controller.cue("sleep", {"duration": 0})
 
             try:
                 robot.disable_wobbling()
@@ -339,6 +357,9 @@ def run(
             robot.media.close()
         except Exception as e:
             logger.debug(f"Error closing media during shutdown: {e}")
+
+        if deps.eyes_controller is not None:
+            deps.eyes_controller.close()
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()

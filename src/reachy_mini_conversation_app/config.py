@@ -121,8 +121,25 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return default
 
 
+def _env_float(name: str, default: float) -> float:
+    """Parse a float environment value."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using default=%s", name, raw, default)
+        return default
+
+
 APP_TIMEOUT_MINUTES_ENV = "REACHY_MINI_APP_TIMEOUT_MINUTES"
 DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
+ESP32_EYES_ENABLED_ENV = "REACHY_MINI_EYES_ENABLED"
+ESP32_EYES_BASE_URL_ENV = "REACHY_MINI_EYES_BASE_URL"
+ESP32_EYES_TIMEOUT_S_ENV = "REACHY_MINI_EYES_TIMEOUT_S"
+DEFAULT_ESP32_EYES_BASE_URL = "http://reachyeyes-s3.local/"
+DEFAULT_ESP32_EYES_TIMEOUT_S = 0.8
 
 
 def resolve_app_timeout_minutes() -> float | None:
@@ -334,6 +351,9 @@ class Config:
     TOOLS_DIRECTORY = Path(_tools_directory_env) if _tools_directory_env else None
     AUTOLOAD_EXTERNAL_TOOLS = _env_flag("AUTOLOAD_EXTERNAL_TOOLS", default=False)
     REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    ESP32_EYES_ENABLED = _env_flag(ESP32_EYES_ENABLED_ENV, default=False)
+    ESP32_EYES_BASE_URL = os.getenv(ESP32_EYES_BASE_URL_ENV)
+    ESP32_EYES_TIMEOUT_S = _env_float(ESP32_EYES_TIMEOUT_S_ENV, DEFAULT_ESP32_EYES_TIMEOUT_S)
 
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
@@ -431,6 +451,9 @@ def refresh_runtime_config_from_env() -> None:
     )
     config.HF_TOKEN = os.getenv("HF_TOKEN")
     config.REACHY_MINI_CUSTOM_PROFILE = LOCKED_PROFILE or os.getenv("REACHY_MINI_CUSTOM_PROFILE")
+    config.ESP32_EYES_ENABLED = _env_flag(ESP32_EYES_ENABLED_ENV, default=False)
+    config.ESP32_EYES_BASE_URL = os.getenv(ESP32_EYES_BASE_URL_ENV)
+    config.ESP32_EYES_TIMEOUT_S = _env_float(ESP32_EYES_TIMEOUT_S_ENV, DEFAULT_ESP32_EYES_TIMEOUT_S)
 
 
 def get_available_voices() -> list[str]:
@@ -453,6 +476,21 @@ def get_hf_direct_ws_url() -> str | None:
     """Return the configured direct Hugging Face realtime URL, if any."""
     value = (getattr(config, "HF_REALTIME_WS_URL", None) or "").strip()
     return value or None
+
+
+def get_esp32_eyes_base_url() -> str | None:
+    """Return the optional ESP32 eyes HTTP API base URL."""
+    value = (getattr(config, "ESP32_EYES_BASE_URL", None) or "").strip()
+    if value:
+        return value
+    if bool(getattr(config, "ESP32_EYES_ENABLED", False)):
+        return DEFAULT_ESP32_EYES_BASE_URL
+    return None
+
+
+def get_esp32_eyes_timeout_s() -> float:
+    """Return the configured ESP32 eyes HTTP timeout."""
+    return float(getattr(config, "ESP32_EYES_TIMEOUT_S", DEFAULT_ESP32_EYES_TIMEOUT_S))
 
 
 def get_hf_connection_selection() -> HFConnectionSelection:

@@ -1,5 +1,6 @@
 """Tests for the headless console stream."""
 
+import time
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -53,12 +54,14 @@ def test_clear_audio_queue_prefers_clear_player() -> None:
     )
     robot = SimpleNamespace(media=SimpleNamespace(audio=audio))
     stream = LocalStream(handler, robot)
+    stream._speaker_playback_until = 100.0
 
     stream.clear_audio_queue()
 
     audio.clear_player.assert_called_once()
     audio.clear_output_buffer.assert_not_called()
     assert handler.output_queue.empty()
+    assert stream._speaker_playback_until == 0.0
 
 
 def test_clear_audio_queue_falls_back_to_output_buffer() -> None:
@@ -90,6 +93,52 @@ def test_clear_audio_queue_drains_queue_in_place() -> None:
 
     assert handler.output_queue is queue  # same object, not replaced
     assert queue.empty()
+
+
+def test_speaker_playback_gate_accumulates_queued_audio(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queued speaker chunks should keep the mic gated until playback drains."""
+    now = [100.0]
+    monkeypatch.setattr(console_mod.time, "monotonic", lambda: now[0])
+
+    robot = SimpleNamespace(media=SimpleNamespace(audio=None))
+    stream = LocalStream(MagicMock(), robot)
+
+    stream._note_speaker_audio_queued(np.zeros(1600, dtype=np.float32), 16000)
+    assert stream._speaker_playback_until == pytest.approx(100.1)
+
+    stream._note_speaker_audio_queued(np.zeros(800, dtype=np.float32), 16000)
+    assert stream._speaker_playback_until == pytest.approx(100.15)
+    assert stream._speaker_playback_active()
+
+    now[0] = 100.5
+    assert not stream._speaker_playback_active()
+
+
+@pytest.mark.asyncio
+async def test_record_loop_suppresses_mic_while_speaker_playback_active() -> None:
+    """Assistant playback should not be sent back into the realtime input."""
+
+    class OneFrameMedia:
+        stream: LocalStream
+
+        def get_input_audio_samplerate(self) -> int:
+            return 16000
+
+        def get_audio_sample(self) -> np.ndarray:
+            self.stream._stop_event.set()
+            return np.ones(160, dtype=np.int16)
+
+    handler = MagicMock()
+    handler.receive = AsyncMock()
+    media = OneFrameMedia()
+    robot = SimpleNamespace(media=media)
+    stream = LocalStream(handler, robot)
+    media.stream = stream
+    stream._speaker_playback_until = time.monotonic() + 1.0
+
+    await stream.record_loop()
+
+    handler.receive.assert_not_awaited()
 
 
 def test_mic_reports_and_toggles_mute_state_over_rpc() -> None:

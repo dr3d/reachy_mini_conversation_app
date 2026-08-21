@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_sleep
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class GoToSleep(Tool):
 
         logger.info("Tool call: go_to_sleep")
         try:
+            cue_sleep(deps)
             return await asyncio.to_thread(deps.go_to_sleep)
         except Exception as e:
             logger.error("go_to_sleep failed: %s", e)

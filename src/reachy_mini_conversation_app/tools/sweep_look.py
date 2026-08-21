@@ -5,6 +5,7 @@ import numpy as np
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_sweep
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
 
@@ -102,4 +103,5 @@ class SweepLook(Tool):
 
         total_duration = transition_duration * 4 + hold_duration * 2
         deps.movement_manager.set_moving_state(total_duration)
+        cue_sweep(deps)
         return {"status": f"sweeping look left-right-center, total {total_duration:.1f}s"}

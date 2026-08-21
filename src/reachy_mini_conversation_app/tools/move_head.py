@@ -3,6 +3,7 @@ from typing import Any, Dict, Tuple, Literal
 
 from reachy_mini.utils import create_head_pose
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_head_direction
 from reachy_mini_conversation_app.dance_emotion_moves import GotoQueueMove
 
 
@@ -72,6 +73,7 @@ class MoveHead(Tool):
 
             movement_manager.queue_move(goto_move)
             movement_manager.set_moving_state(deps.motion_duration_s)
+            cue_head_direction(deps, direction, deps.motion_duration_s)
 
             return {"status": f"looking {direction}"}
 

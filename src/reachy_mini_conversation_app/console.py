@@ -96,6 +96,7 @@ LEGACY_STARTUP_ENV_NAMES = (
     "REACHY_MINI_VOICE_OVERRIDE",
 )
 BACKEND_RETRY_DELAY_SECONDS = 5.0
+SPEAKER_PLAYBACK_TAIL_SECONDS = 0.25
 
 
 class LocalStream:
@@ -131,6 +132,7 @@ class LocalStream:
         self._backend_connection_state = "not_started"
         self._backend_error: str | None = None
         self._backend_retry_delay = BACKEND_RETRY_DELAY_SECONDS
+        self._speaker_playback_until = 0.0
         # JSON-RPC control surface (mounted at /rpc in _init_settings_ui_if_needed).
         # Notifications (conversation.turn/phase/transcript/activity) are pushed
         # here from activity + transcripts. Survives handler rebuilds (mounted once).
@@ -144,6 +146,7 @@ class LocalStream:
         """Set the active handler and wire LocalStream-owned helpers into it."""
         self.handler = handler
         self.handler._clear_queue = self.clear_audio_queue
+        self.handler._playback_active = self._speaker_playback_active
         self._attach_observers_to_handler()
 
     def _attach_observers_to_handler(self) -> None:
@@ -183,6 +186,20 @@ class LocalStream:
             return
         level = max(0.0, min(1.0, rms * self._LEVEL_GAIN))
         self._rpc.broadcast_threadsafe("conversation.level", {"role": role, "rms": round(level, 3)})
+
+    def _speaker_playback_active(self) -> bool:
+        """Return whether queued speaker audio may still be audible."""
+        return time.monotonic() < self._speaker_playback_until + SPEAKER_PLAYBACK_TAIL_SECONDS
+
+    def _note_speaker_audio_queued(self, audio_frame: np.ndarray, sample_rate: int) -> None:
+        """Track queued speaker duration so the mic does not hear Reachy's own voice."""
+        if sample_rate <= 0 or audio_frame.size == 0:
+            return
+
+        samples = audio_frame.shape[0] if audio_frame.ndim > 1 else audio_frame.size
+        frame_duration = samples / sample_rate
+        start_at = max(time.monotonic(), self._speaker_playback_until)
+        self._speaker_playback_until = start_at + frame_duration
 
     # Map backend activity reasons to the orb's turn states (mirrors the old
     # browser orb's mapActivityToState so the orb reliably reaches listening/
@@ -849,6 +866,7 @@ class LocalStream:
         deprecated ``clear_output_buffer()`` only for older SDKs.
         """
         logger.info("User intervention: flushing player queue")
+        self._speaker_playback_until = 0.0
         audio = getattr(self._robot.media, "audio", None)
         if audio is not None:
             if hasattr(audio, "clear_player") and callable(audio.clear_player):
@@ -878,7 +896,7 @@ class LocalStream:
 
         while not self._stop_event.is_set():
             audio_frame = self._robot.media.get_audio_sample()
-            if audio_frame is not None and not self._mic_muted:
+            if audio_frame is not None and not self._mic_muted and not self._speaker_playback_active():
                 await self.handler.receive((input_sample_rate, audio_frame))
                 self._emit_level("user", audio_frame)
             await asyncio.sleep(0)  # avoid busy loop
@@ -903,7 +921,7 @@ class LocalStream:
                         )
 
             elif isinstance(handler_output, tuple):
-                _, audio_data = handler_output
+                sample_rate, audio_data = handler_output
 
                 # Skip empty audio frames
                 if audio_data.size == 0:
@@ -921,6 +939,7 @@ class LocalStream:
                 # Cast if needed
                 audio_frame = audio_to_float32(audio_data)
 
+                self._note_speaker_audio_queued(audio_frame, sample_rate)
                 self._robot.media.push_audio_sample(audio_frame)
                 self._emit_level("assistant", audio_frame)
 

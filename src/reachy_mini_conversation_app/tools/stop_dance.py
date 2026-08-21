@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_release
 
 
 logger = logging.getLogger(__name__)
@@ -29,4 +30,5 @@ class StopDance(Tool):
         logger.info("Tool call: stop_dance")
         movement_manager = deps.movement_manager
         movement_manager.clear_move_queue()
+        cue_release(deps)
         return {"status": "stopped dance and cleared queue"}

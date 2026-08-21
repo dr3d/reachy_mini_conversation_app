@@ -25,6 +25,8 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Running the app](#running-the-app)
+- [Firmware sandbox](#firmware-sandbox)
+- [ESP32 eyes HTTP API](#esp32-eyes-http-api)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
 - [Creating and adding tools](#creating-and-adding-tools)
 - [Advanced features](#advanced-features)
@@ -107,6 +109,8 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
+| `REACHY_MINI_EYES_BASE_URL` | Optional HTTP base URL for ESP32/RP5 eye-display control, for example `http://192.168.4.1/` or `http://reachyeyes-s3.local/`. |
+| `REACHY_MINI_EYES_TIMEOUT_S` | HTTP timeout for optional eye-display control. Defaults to `0.8`. |
 
 ### Hugging Face Connection Modes
 
@@ -181,6 +185,190 @@ reachy-mini-conversation-app --no-camera
 reachy-mini-conversation-app --ui
 ```
 
+## Firmware sandbox
+
+`firmware/esp32-eyes/` contains the ESP32-S3 eye-display firmware imported from the sibling
+`reachy_eyes/esp32-eyes` project so it can evolve alongside the conversation app integration work.
+
+The firmware drives two 240x240 GC9A01 round eye displays plus an optional third mouth display, and renders
+gaze, blinks, moods, mouth shapes, sleep, idle beats, brightness, and flipped orientation on-device. Build and
+upload it with PlatformIO:
+
+```bash
+cd firmware/esp32-eyes
+pio run
+pio run -t upload
+pio device monitor
+```
+
+The conversation app integrates with eye displays through the HTTP API used by the ESP32/RP5 eye runtimes.
+Configure the base URL in `.env`:
+
+```env
+REACHY_MINI_EYES_BASE_URL=http://reachyeyes-s3.local/
+```
+
+The bundled firmware config leaves station Wi-Fi credentials empty, so the board starts the `ReachyEyes-S3`
+access point with password `reachyeyes`; the default AP URL is usually `http://192.168.4.1/`. To make the
+board join your LAN instead, copy `firmware/esp32-eyes/include/reachy_config_private.example.h` to
+`firmware/esp32-eyes/include/reachy_config_private.h`, fill in `REACHY_WIFI_SSID` and
+`REACHY_WIFI_PASSWORD`, then rebuild and flash. The private header is ignored by git.
+
+The app uses `GET /state`, `/moods`, `/emotions`, `/beats`, `/styles`, `/mouth_shapes`, and `/mouth_styles`
+plus `POST /control`, `/release`, `/mood`, `/emotion`, `/expression`, `/beat`, `/style`, `/mouth`, `/gaze`,
+`/blink`, `/wink`, and `/sleep` for high-level cues. The HTTP API is layered onto the same full
+mood/gaze/blink/beat/style/mouth implementation as the USB serial commands.
+Current ESP32-S3 display pins are defined in `firmware/esp32-eyes/include/reachy_config.h`. The three-display
+layout shares GPIO4/5/6/7 for SCLK/MOSI/DC/RST, with GPIO15/16/17 reserved for left-eye/right-eye/mouth CS.
+The firmware owns animation timing, so the conversation app sends high-level HTTP intents rather than streaming
+frames.
+
+## ESP32 eyes HTTP API
+
+The ESP32 eyes API is intentionally high-level. The app sends semantic cues over HTTP; the firmware owns
+rendering, easing, blinking, idle beats, gaze projection, brightness, and display orientation. Query these
+endpoints on a running board to get the firmware's current value lists:
+
+```bash
+EYES_URL=http://reachyeyes-s3.local
+curl "$EYES_URL/state"
+curl "$EYES_URL/styles"
+curl "$EYES_URL/emotions"
+curl "$EYES_URL/moods"
+curl "$EYES_URL/mouth_shapes"
+curl "$EYES_URL/mouth_styles"
+curl "$EYES_URL/beats"
+```
+
+The conversation app uses `REACHY_MINI_EYES_BASE_URL` to reach the board and exposes `set_eyes` for direct
+face requests. Most normal robot behavior should not require the model to call `set_eyes`: existing
+conversation and motion choreography cue the eyes and mouth automatically.
+
+| App event or tool | Face cue |
+|-------------------|---------|
+| User starts speaking | `emotion=curious`, mouth neutral |
+| Assistant starts speaking | `emotion=happy`, mouth talking |
+| Assistant finishes / idle release | `release` |
+| `play_emotion` | Matching eye emotion, such as `afraid`, `angry`, `sleepy`, `bashful`, or `happy` |
+| `dance` | `beat=goofy` |
+| `move_head` | Matching normalized gaze direction |
+| `sweep_look` | Focused eyes with explicit left-center-right-center gaze sequence |
+| `go_to_sleep` | `sleep` |
+| `stop_dance` / `stop_emotion` | `release` |
+
+Direct face commands still use the `set_eyes` tool or the HTTP API. Eye holdoffs keep explicit requests and
+routine choreography visible briefly so automatic speaking/listening cues do not immediately undo them.
+
+Common HTTP examples:
+
+```bash
+EYES_URL=http://reachyeyes-s3.local
+
+curl -X POST "$EYES_URL/style" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"robot"}'
+
+curl -X POST "$EYES_URL/expression" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"suspicious","duration":4}'
+
+curl -X POST "$EYES_URL/control" \
+  -H "Content-Type: application/json" \
+  -d '{"gaze":{"x":1,"y":0,"duration":0,"move_ms":300}}'
+
+curl -X POST "$EYES_URL/mouth" \
+  -H "Content-Type: application/json" \
+  -d '{"style":"human","shape":"smirk_right","talking":true,"energy":0.65,"duration":3}'
+
+curl -X POST "$EYES_URL/release" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Canonical renderer styles:
+
+| Style | Basic look |
+|-------|------------|
+| `friendly` | Default natural iris. |
+| `classic` | Classic blue/gray iris. |
+| `cartoony` | Larger, brighter cartoon iris. |
+| `robot` | Big simple dot/robot eyes. |
+| `sinister` | Red slit/cat-like pupil style. |
+| `sleepy` | Muted steel-blue sleepy renderer. |
+
+Accepted style aliases include `cartoon -> cartoony`, `dot`/`big_dot`/`row_body -> robot`,
+`red`/`slit`/`slits`/`cat_eye -> sinister`, and `steel -> sleepy`. Keep `robot` and `robotic`
+distinct: `robot` is a renderer style, while `robotic` is a mood with rigid, quantized motion.
+
+Mouth renderer styles:
+
+| Style | Basic look |
+|-------|------------|
+| `human` | Blue glowing rounded mouth inspired by 790-style soft mechanical lips. |
+| `robot` | Simple cyan bar mouth for debugging or a more synthetic look. |
+
+Mouth shapes:
+
+```text
+neutral, smile, smirk_left, smirk_right, open, wide, frown, grimace, sneer, sleep
+```
+
+`POST /mouth` accepts `style`, `shape`, `talking`, `energy`, and `duration`. Talking is energy-based in v1:
+it varies mouth opening rhythmically during assistant speech rather than doing phoneme lip sync.
+
+Eye moods and emotions:
+
+| Emotion | What to look for |
+|---------|------------------|
+| `calm` | Neutral open eyes, soft stable gaze. |
+| `curious` | Slightly lifted/open, attentive tilt, small lively jitter. |
+| `surprised` | Wide open eyes, larger pupils. |
+| `suspicious` | Narrowed lids, side-eye/skeptical squint. |
+| `afraid` | Wide tense eyes with more jitter/tremble. |
+| `angry` | Downward slanted top lids, sharper glare. |
+| `sleepy` | Heavy drooping lids, gaze sits lower. |
+| `sleep` | Eyes close/blank. |
+| `goofy` | Asymmetric playful gaze offsets. |
+| `robotic` | Rigid, quantized gaze movement. |
+| `wonder` | Wide open, soft amazed look. |
+| `glitchy` | Jittery, twitchy offsets. |
+| `happy` | Soft smile-like lid curve, gaze lifted slightly. |
+| `delighted` | Wide happy eyes, sparkle accents, lively motion. |
+| `bashful` | Soft shy lids, gaze drifts downward. |
+| `bored` | Heavy flat lids, low-energy gaze. |
+| `focused` | Narrower, centered, reduced gaze range. |
+| `confused` | Asymmetric lids, uneven puzzled look. |
+| `proud` | Slightly narrowed, upward/confident gaze. |
+| `mischief` | Narrow sly squint, angled lids. |
+| `affection` | Soft open lids, warm rounded shape, slight sparkle. |
+
+`/mood` and `/emotion` both apply longer-lived mood presets. `/expression` applies the same visual vocabulary
+as a shorter overlay. `fear`, `frighten`, `frightened`, and `scared` are accepted app aliases for `afraid`.
+
+Idle beats:
+
+```text
+slow_smile, affection, inspect, thoughtful, daydream, mischief, confused,
+focus_lock, double_take, goofy, drowsy, robot_scan, wary, startle
+```
+
+Gaze accepts either normalized app coordinates or full firmware target coordinates. With normalized gaze,
+omit `z` and send `x`/`y` in `-1..1`; `x=1` means Reachy's right, `x=-1` means Reachy's left, `y=1` means
+down, and `y=-1` means up. The current ESP32 calibration maps full normalized gaze to a strong off-axis
+target and renders it with 75 px horizontal travel and 50 px vertical travel. If `z` is included, `x`/`y`/`z`
+are treated as raw firmware target coordinates instead of normalized app coordinates.
+
+Other control fields:
+
+| Field or route | Effect |
+|----------------|--------|
+| `POST /blink` or `/control` with `blink=true` | Trigger blink. |
+| `POST /wink` or `/control` with `wink=true` | Trigger wink; optional `eye` can select `left` or `right`. |
+| `brightness` / `brightness_percent` | Set display brightness. `brightness` may be `0.0..1.0`. |
+| `flip` | Flip display orientation; `"toggle"` is accepted by `/control`. |
+| `idle` / `autonomous` | Re-enable or disable autonomous firmware idle behavior. |
+| `release` or `POST /release` | Clear app/manual overrides and return to firmware idle behavior. |
+
 ## LLM tools exposed to the assistant
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.
@@ -195,6 +383,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `camera` | Capture the latest camera frame and analyze it with the selected realtime backend. | Core install only. Requires the camera (disable with `--no-camera`). |
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
+| `set_eyes` | Control optional ESP32/RP5 face displays through their HTTP API. | Requires `REACHY_MINI_EYES_BASE_URL`. |
 | `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |
 | `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Shared tool, enabled by default in the default profile. |

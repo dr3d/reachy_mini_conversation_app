@@ -26,6 +26,7 @@ class AsyncStreamHandler:
     def __init__(self) -> None:
         """Initialize shared stream handler state."""
         self._clear_queue: Callable[[], None] | None = None
+        self._playback_active: Callable[[], bool] | None = None
 
 
 async def wait_for_item(queue: asyncio.Queue[QueueItem], timeout: float = 0.1) -> QueueItem | None:

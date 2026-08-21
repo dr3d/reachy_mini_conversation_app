@@ -5,6 +5,7 @@ import unicodedata
 from typing import TYPE_CHECKING, Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_body_emotion
 
 
 if TYPE_CHECKING:
@@ -176,6 +177,79 @@ _KEYWORD_INTENTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("yes", "understanding"), "yes_understanding"),
 )
 
+_EYE_EMOTION_BY_INTENT: dict[str, str] = {
+    "happy": "happy",
+    "excited": "happy",
+    "loving": "happy",
+    "grateful": "happy",
+    "success": "happy",
+    "thinking": "curious",
+    "attentive": "curious",
+    "confused": "confused",
+    "uncertain": "confused",
+    "sad": "sleepy",
+    "downcast": "sleepy",
+    "lonely": "sleepy",
+    "angry": "angry",
+    "irritated": "angry",
+    "displeased": "angry",
+    "disgusted": "angry",
+    "scared": "afraid",
+    "anxious": "afraid",
+    "surprised": "surprised",
+    "amazed": "surprised",
+    "impatient": "suspicious",
+    "embarrassed": "bashful",
+    "bored": "sleepy",
+    "tired": "sleepy",
+    "sleepy": "sleepy",
+    "yes": "happy",
+    "yes_understanding": "happy",
+    "no": "suspicious",
+    "no_sad": "afraid",
+    "no_excited": "suspicious",
+    "no_firm": "angry",
+    "welcoming": "happy",
+    "greeting": "happy",
+    "goodbye": "happy",
+    "go_away": "angry",
+    "helpful": "happy",
+    "dance": "happy",
+    "electric": "surprised",
+    "dying": "afraid",
+}
+
+_EYE_EMOTION_BY_MOVE_PREFIX: tuple[tuple[str, str], ...] = (
+    ("anxiety", "afraid"),
+    ("boredom", "sleepy"),
+    ("confused", "confused"),
+    ("dance", "happy"),
+    ("disgusted", "angry"),
+    ("displeased", "angry"),
+    ("downcast", "sleepy"),
+    ("exhausted", "sleepy"),
+    ("fear", "afraid"),
+    ("grateful", "happy"),
+    ("impatient", "suspicious"),
+    ("irritated", "angry"),
+    ("laughing", "happy"),
+    ("lonely", "sleepy"),
+    ("loving", "happy"),
+    ("no_", "suspicious"),
+    ("no", "suspicious"),
+    ("rage", "angry"),
+    ("sad", "sleepy"),
+    ("scared", "afraid"),
+    ("shy", "bashful"),
+    ("success", "happy"),
+    ("surprised", "surprised"),
+    ("thoughtful", "curious"),
+    ("uncertain", "confused"),
+    ("understanding", "happy"),
+    ("welcoming", "happy"),
+    ("yes", "happy"),
+)
+
 
 def _normalize_emotion_key(value: str) -> str:
     """Normalize an emotion request for exact intent and keyword matching."""
@@ -231,6 +305,23 @@ def random_curated_emotion(available_emotions: list[str]) -> str:
     return random.choice(available_emotions)
 
 
+def resolve_eye_emotion(requested_emotion: object, resolved_move: str) -> str | None:
+    """Resolve a recorded body emotion to a compact eye emotion."""
+    normalized = _normalize_emotion_key(str(requested_emotion or ""))
+    if normalized in _INTENT_TO_MOVES:
+        return _EYE_EMOTION_BY_INTENT.get(normalized)
+
+    keyword_intent = _keyword_intent(normalized)
+    if keyword_intent is not None:
+        return _EYE_EMOTION_BY_INTENT.get(keyword_intent)
+
+    move_key = _normalize_emotion_key(resolved_move)
+    for prefix, eye_emotion in _EYE_EMOTION_BY_MOVE_PREFIX:
+        if move_key.startswith(prefix):
+            return eye_emotion
+    return None
+
+
 class PlayEmotion(Tool):
     """Play a pre-recorded emotion."""
 
@@ -276,6 +367,9 @@ class PlayEmotion(Tool):
             if not emotion_name:
                 logger.info("play_emotion: %r did not resolve; using random curated", requested_emotion)
                 emotion_name = random_curated_emotion(emotion_names)
+
+            eye_emotion = resolve_eye_emotion(requested_emotion, emotion_name)
+            cue_body_emotion(deps, eye_emotion)
 
             movement_manager = deps.movement_manager
             emotion_move = EmotionQueueMove(emotion_name, library)

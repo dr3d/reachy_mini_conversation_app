@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
 from reachy_mini_conversation_app.tools.tool_constants import ToolState
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolProgress,
@@ -101,6 +102,22 @@ class TestToolNotification:
         assert n.status == ToolState.COMPLETED
         assert n.result == {"data": 1}
         assert n.error is None
+
+
+class TestToolCallRoutine:
+    """Validate background tool-call routine construction."""
+
+    def test_constructs_with_eye_controller_dependency(self) -> None:
+        """Optional eye controller typing should not leave Pydantic forward refs unresolved."""
+        deps = ToolDependencies(
+            reachy_mini=MagicMock(),
+            movement_manager=MagicMock(),
+            eyes_controller=MagicMock(),
+        )
+
+        routine = ToolCallRoutine(tool_name="set_eyes", args_json_str='{"style":"red"}', deps=deps)
+
+        assert routine.deps is deps
 
 
 class TestBackgroundTool:

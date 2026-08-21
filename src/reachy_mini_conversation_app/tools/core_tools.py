@@ -44,6 +44,7 @@ class ToolDependencies:
     camera_enabled: bool = False
     motion_duration_s: float = 1.0
     go_to_sleep: Callable[[], dict[str, Any]] | None = None
+    eyes_controller: Any = None
 
 
 class ToolSpec(TypedDict):

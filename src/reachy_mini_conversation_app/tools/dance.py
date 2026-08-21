@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict
 
 from reachy_mini_conversation_app.tools.core_tools import Tool, ToolDependencies
+from reachy_mini_conversation_app.eyes_choreography import cue_dance
 
 
 logger = logging.getLogger(__name__)
@@ -82,5 +83,6 @@ class Dance(Tool):
         for _ in range(repeat):
             dance_move = DanceQueueMove(move_name)
             movement_manager.queue_move(dance_move)
+        cue_dance(deps)
 
         return {"status": "queued", "move": move_name, "repeat": repeat}

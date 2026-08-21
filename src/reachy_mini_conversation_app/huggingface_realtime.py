@@ -48,6 +48,12 @@ from reachy_mini_conversation_app.tools.core_tools import (
     ToolDependencies,
     get_tool_specs,
 )
+from reachy_mini_conversation_app.eyes_choreography import (
+    cue_eyes,
+    cue_conversation_idle,
+    cue_conversation_speaking,
+    cue_conversation_listening,
+)
 from reachy_mini_conversation_app.conversation_handler import ConversationHandler
 from reachy_mini_conversation_app.tools.background_tool_manager import (
     ToolCallRoutine,
@@ -64,6 +70,87 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_MANUAL_EYE_CUE_HOLDOFF_S: Final[float] = 12.0
+_TOOL_EYE_CUE_HOLDOFF_S: Final[dict[str, float]] = {
+    "dance": 8.0,
+    "play_emotion": 6.0,
+    "sweep_look": 14.5,
+}
+_TRANSCRIPT_EYE_EXPRESSION_DURATION_S: Final[float] = 6.0
+_TRANSCRIPT_EYE_GAZE_DURATION_S: Final[float] = 5.0
+_TRANSCRIPT_EYE_GAZE_MOVE_MS: Final[int] = 250
+_TRANSCRIPT_EYE_STYLE_ALIASES: Final[dict[str, str]] = {
+    "friendly": "friendly",
+    "classic": "classic",
+    "cartoon": "cartoony",
+    "cartoony": "cartoony",
+    "robot": "robot",
+    "robotic": "robot",
+    "row body": "robot",
+    "row bot": "robot",
+    "dot": "robot",
+    "big dot": "robot",
+    "sinister": "sinister",
+    "slit": "sinister",
+    "slits": "sinister",
+    "cat eye": "sinister",
+    "cat eyes": "sinister",
+    "red": "sinister",
+    "sleepy": "sleepy",
+    "steel": "sleepy",
+}
+_TRANSCRIPT_EYE_IMPLICIT_STYLE_TERMS: Final[tuple[str, ...]] = (
+    "robot",
+    "robotic",
+    "row body",
+    "row bot",
+    "dot",
+    "big dot",
+    "sinister",
+    "slit",
+    "slits",
+    "cat eye",
+    "cat eyes",
+)
+_TRANSCRIPT_EYE_EXPRESSION_ALIASES: Final[dict[str, str]] = {
+    "suspicious": "suspicious",
+    "afraid": "afraid",
+    "fear": "afraid",
+    "frighten": "afraid",
+    "frightened": "afraid",
+    "scared": "afraid",
+    "angry": "angry",
+    "curious": "curious",
+    "surprised": "surprised",
+    "sleepy": "sleepy",
+    "happy": "happy",
+    "delighted": "delighted",
+    "bashful": "bashful",
+    "bored": "bored",
+    "focused": "focused",
+    "confused": "confused",
+    "proud": "proud",
+    "mischief": "mischief",
+    "affection": "affection",
+    "calm": "calm",
+    "goofy": "goofy",
+    "robotic": "robotic",
+    "wonder": "wonder",
+    "glitch": "glitch",
+    "glitchy": "glitch",
+}
+_TRANSCRIPT_EYE_INTENT_TERMS: Final[tuple[str, ...]] = (
+    "eye",
+    "eyes",
+    "gaze",
+    "aim",
+    "stare",
+    "look",
+    "expression",
+    "face",
+    "mood",
+    "style",
+)
 
 
 class InputTranscriptChunksByItem(BaseModel):
@@ -163,6 +250,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         self._startup_greeting_sent = False
         self._in_flight_tool_calls: set[str] = set()
         self._tool_batch_needs_response = False
+        self._manual_eye_cue_holdoff_until = 0.0
 
     @staticmethod
     def _sanitize_tool_result_for_model(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any]:
@@ -233,7 +321,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         model="gpt-4o-transcribe",
                         language=config.REALTIME_TRANSCRIPTION_LANGUAGE,
                     ),
-                    turn_detection=ServerVad(type="server_vad", interrupt_response=True),
+                    turn_detection=ServerVad(type="server_vad", interrupt_response=False),
                 ),
                 output=RealtimeAudioConfigOutputParam(
                     format=_native_rate_audio_pcm(),  # type: ignore[typeddict-item]
@@ -251,6 +339,124 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
     def _idle_behavior_ready(self) -> bool:
         """Hold idle behavior while a model response is still active."""
         return self._response_done_event.is_set()
+
+    def _assistant_output_active(self) -> bool:
+        """Return whether assistant audio/response output should block VAD barge-in."""
+        playback_active = self._playback_active
+        if playback_active is not None:
+            try:
+                if playback_active():
+                    return True
+            except Exception:
+                logger.debug("playback activity observer raised", exc_info=True)
+        return not self._response_done_event.is_set()
+
+    def _cue_eyes(self, action: str, payload: dict[str, object] | None = None) -> None:
+        """Send a non-critical cue to optional eye hardware."""
+        eyes_controller = self.deps.eyes_controller
+        if eyes_controller is None:
+            return
+        if self._manual_eye_cue_holdoff_until > time.monotonic():
+            logger.debug("Skipping automatic eye cue during manual eye-control holdoff: %s", action)
+            return
+        cue_eyes(self.deps, action, payload)
+
+    def _hold_automatic_eye_cues(self, duration_s: float = _MANUAL_EYE_CUE_HOLDOFF_S) -> None:
+        """Let explicit set_eyes commands remain visible briefly."""
+        self._manual_eye_cue_holdoff_until = max(
+            self._manual_eye_cue_holdoff_until,
+            time.monotonic() + duration_s,
+        )
+
+    def _hold_automatic_eye_cues_for_tool(self, tool_name: str) -> None:
+        duration_s = _TOOL_EYE_CUE_HOLDOFF_S.get(tool_name)
+        if duration_s is not None:
+            self._hold_automatic_eye_cues(duration_s)
+
+    def _cue_eyes_from_transcript(self, transcript: str) -> None:
+        """Apply obvious eye-control requests without relying on model tool choice."""
+        eyes_controller = self.deps.eyes_controller
+        if eyes_controller is None:
+            return
+
+        normalized_transcript = " ".join(transcript.lower().replace("-", " ").replace("_", " ").split())
+        has_eye_intent = any(term in normalized_transcript for term in _TRANSCRIPT_EYE_INTENT_TERMS)
+        has_implicit_style = any(term in normalized_transcript for term in _TRANSCRIPT_EYE_IMPLICIT_STYLE_TERMS)
+        if not has_eye_intent and not has_implicit_style:
+            return
+
+        for style_text, style_name in _TRANSCRIPT_EYE_STYLE_ALIASES.items():
+            if style_text in normalized_transcript and (
+                has_eye_intent
+                or "style" in normalized_transcript
+                or "type" in normalized_transcript
+                or "render" in normalized_transcript
+                or style_text in _TRANSCRIPT_EYE_IMPLICIT_STYLE_TERMS
+            ):
+                self._cue_manual_eyes("style", {"name": style_name})
+                return
+
+        for expression_text, expression_name in _TRANSCRIPT_EYE_EXPRESSION_ALIASES.items():
+            if expression_text in normalized_transcript:
+                self._cue_manual_eyes(
+                    "expression",
+                    {
+                        "name": expression_name,
+                        "duration": _TRANSCRIPT_EYE_EXPRESSION_DURATION_S,
+                    },
+                )
+                return
+
+        gaze_x = 0.0
+        gaze_y = 0.0
+        gaze_requested = False
+        full_range = (
+            "all the way" in normalized_transcript
+            or "hard " in normalized_transcript
+            or "far " in normalized_transcript
+            or "full " in normalized_transcript
+        )
+        horizontal_gaze = 1.0 if full_range else 0.8
+        vertical_gaze = 1.0 if full_range else 0.45
+        if "left" in normalized_transcript:
+            gaze_x -= horizontal_gaze
+            gaze_requested = True
+        if "right" in normalized_transcript:
+            gaze_x += horizontal_gaze
+            gaze_requested = True
+        if "up" in normalized_transcript:
+            gaze_y -= vertical_gaze
+            gaze_requested = True
+        if "down" in normalized_transcript:
+            gaze_y += vertical_gaze
+            gaze_requested = True
+        if "center" in normalized_transcript or "straight ahead" in normalized_transcript:
+            gaze_x = 0.0
+            gaze_y = 0.0
+            gaze_requested = True
+
+        if gaze_requested:
+            self._cue_manual_eyes(
+                "control",
+                {
+                    "gaze": {
+                        "x": gaze_x,
+                        "y": gaze_y,
+                        "duration": _TRANSCRIPT_EYE_GAZE_DURATION_S,
+                        "move_ms": _TRANSCRIPT_EYE_GAZE_MOVE_MS,
+                    }
+                },
+            )
+
+    def _cue_manual_eyes(self, action: str, payload: dict[str, object]) -> None:
+        eyes_controller = self.deps.eyes_controller
+        if eyes_controller is None:
+            return
+        self._hold_automatic_eye_cues()
+        try:
+            eyes_controller.cue(action, payload)
+        except Exception:
+            logger.debug("Manual eye cue failed", exc_info=True)
 
     async def _cancel_partial_transcript_task(self) -> None:
         if self.partial_transcript_task and not self.partial_transcript_task.done():
@@ -593,6 +799,11 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
             tool_result = {"error": "No result returned from tool execution"}
             tool_result_for_model = tool_result
 
+        if completed_tool.tool_name == "set_eyes":
+            self._hold_automatic_eye_cues()
+        else:
+            self._hold_automatic_eye_cues_for_tool(completed_tool.tool_name)
+
         # Connection may have closed while tool was running
         if not self.connection:
             logger.warning(
@@ -742,6 +953,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 async for event in self.connection:
                     logger.debug("Realtime event: %s", event.type)
                     if event.type == "input_audio_buffer.speech_started":
+                        if self._assistant_output_active():
+                            logger.debug("Ignoring speech_started while assistant output is active")
+                            continue
                         self._mark_activity("user_speech_started")
                         self._turn_user_done_at = None
                         self._turn_response_created_at = None
@@ -749,6 +963,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         if self._clear_queue:
                             self._clear_queue()
                         self.deps.movement_manager.set_listening(True)
+                        if self._manual_eye_cue_holdoff_until <= time.monotonic():
+                            cue_conversation_listening(self.deps)
                         logger.debug("User speech started")
 
                     if event.type == "input_audio_buffer.speech_stopped":
@@ -758,6 +974,7 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
 
                     if event.type == "response.output_audio.done":
                         self.deps.movement_manager.set_speaking(False)
+                        self._cue_eyes("release")
                         logger.debug("response completed")
 
                     if event.type == "response.output_text.delta":
@@ -769,6 +986,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                     if event.type == "response.created":
                         self._mark_activity("response_created")
                         self.deps.movement_manager.set_speaking(True)
+                        if self._manual_eye_cue_holdoff_until <= time.monotonic():
+                            cue_conversation_speaking(self.deps)
                         self._response_done_event.clear()
                         self._response_started_or_rejected_event.set()
                         if self._turn_user_done_at is not None and self._turn_response_created_at is None:
@@ -783,6 +1002,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         self.deps.movement_manager.set_speaking(False)
                         self._response_done_event.set()
                         self._response_started_or_rejected_event.set()
+                        if self._manual_eye_cue_holdoff_until <= time.monotonic():
+                            cue_conversation_idle(self.deps)
                         logger.debug("Response done")
 
                     if event.type == "conversation.item.input_audio_transcription.delta":
@@ -818,6 +1039,8 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         if not transcript:
                             logger.debug("Ignoring empty user transcript")
                             continue
+
+                        self._cue_eyes_from_transcript(transcript)
 
                         self._turn_user_done_at = time.perf_counter()
                         self._turn_response_created_at = None
@@ -876,6 +1099,9 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                                 call_id,
                             )
                             continue
+
+                        if tool_name == "set_eyes":
+                            self._hold_automatic_eye_cues()
 
                         self._in_flight_tool_calls.add(call_id)
                         background_tool = await self.tool_manager.start_tool(
