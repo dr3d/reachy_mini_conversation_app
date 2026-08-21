@@ -1984,8 +1984,8 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   frame.fillScreen(BLACK);
 
   if (shape == MouthShape::Sleep && !mouthState.talking) {
-    const int16_t sleepX = 18 + int16_t(4.0f * sinf(float(now) * 0.0017f));
-    const int16_t sleepY = 119 + int16_t(2.0f * sinf(float(now) * 0.0011f + 0.8f));
+    const int16_t sleepX = 18;
+    const int16_t sleepY = 119;
     frame.fillRoundRect(sleepX, sleepY, 198, 15, 7, rgb(118, 28, 44));
     frame.drawFastHLine(sleepX + 22, sleepY + 3, 142, rgb(218, 92, 102));
     frame.drawFastHLine(sleepX + 30, sleepY + 12, 126, rgb(58, 8, 22));
@@ -1995,14 +1995,17 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   const int16_t w = int16_t(134.0f + pose.width * 226.0f);
   const int16_t openH = int16_t(7.0f + pose.open * 92.0f);
   const int16_t lipH = int16_t(clampf(30.0f + pose.open * 28.0f + pose.tension * 7.0f, 28.0f, 62.0f));
-  const float idleDrift = mouthState.talking ? 1.0f : 0.42f;
-  const int16_t driftX = int16_t(idleDrift * (7.0f * sinf(float(now) * 0.0019f) +
-                                             3.0f * sinf(float(now) * 0.0047f + 1.4f)));
-  const int16_t driftY = int16_t(idleDrift * (3.0f * sinf(float(now) * 0.0013f + 0.6f)));
+  const int16_t driftX = mouthState.talking
+    ? int16_t(5.0f * sinf(float(now) * 0.0031f) + 2.0f * sinf(float(now) * 0.0071f + 1.4f))
+    : 0;
+  const int16_t driftY = mouthState.talking
+    ? int16_t(2.0f * sinf(float(now) * 0.0027f + 0.6f))
+    : 0;
   const int16_t cx = 120 + int16_t(pose.skew * 26.0f) + driftX;
   const int16_t cy = 126 + int16_t(pose.tension * 4.0f) + driftY;
   const int16_t curve = int16_t(pose.curve * 18.0f);
-  const int16_t asym = int16_t(8.0f * sinf(float(now) * 0.0023f + pose.width * 3.1f)) +
+  const int16_t asym = (mouthState.talking ? int16_t(5.0f * sinf(float(now) * 0.0041f + pose.width * 3.1f))
+                                           : 0) +
                        int16_t(pose.skew * 12.0f);
   const int16_t cavityW = int16_t(float(w) * (0.86f - pose.tension * 0.05f));
   const int16_t cavityH = maxi16(5, openH);
