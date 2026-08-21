@@ -3091,9 +3091,10 @@ void setupHttpRoutes() {
 }
 
 void startConfigAccessPoint() {
-  WiFi.softAP(REACHY_AP_SSID, REACHY_AP_PASSWORD);
+  const bool started = WiFi.softAP(REACHY_AP_SSID, REACHY_AP_PASSWORD);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  Serial.printf("WiFi AP SSID: %s\n", REACHY_AP_SSID);
+  WiFi.setSleep(false);
+  Serial.printf("WiFi AP %s: %s\n", started ? "started" : "FAILED", REACHY_AP_SSID);
   Serial.print("WiFi AP IP: ");
   Serial.println(WiFi.softAPIP());
   Serial.print("Face UI AP URL: http://");
@@ -3113,6 +3114,7 @@ void setupWiFi() {
   if (strlen(stationSsid) > 0) {
 #if REACHY_AP_ALWAYS_ON
     WiFi.mode(WIFI_AP_STA);
+    WiFi.setSleep(false);
     startConfigAccessPoint();
     accessPointStarted = true;
 #else
@@ -3128,7 +3130,11 @@ void setupWiFi() {
     }
     Serial.println();
     if (WiFi.status() == WL_CONNECTED) {
+#if REACHY_AP_ALWAYS_ON
+      WiFi.setSleep(false);
+#else
       WiFi.setSleep(true);
+#endif
       WiFi.setTxPower(WIFI_POWER_8_5dBm);
       Serial.print("WiFi IP: ");
       Serial.println(WiFi.localIP());
