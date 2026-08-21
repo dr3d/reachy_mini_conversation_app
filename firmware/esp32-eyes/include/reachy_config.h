@@ -47,7 +47,7 @@
 #endif
 
 #ifndef REACHY_AP_ALWAYS_ON
-#define REACHY_AP_ALWAYS_ON 1
+#define REACHY_AP_ALWAYS_ON 0
 #endif
 
 #ifndef REACHY_HOSTNAME

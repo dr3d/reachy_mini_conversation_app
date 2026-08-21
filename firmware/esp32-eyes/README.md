@@ -26,19 +26,17 @@ cp include/reachy_config_private.example.h include/reachy_config_private.h
 
 Then fill in `REACHY_WIFI_SSID` and `REACHY_WIFI_PASSWORD`. The private header is ignored by git.
 
-By default, the board keeps a setup access point available named `ReachyEyes-S3` with password `reachyeyes`. The AP URL is usually:
+By default, the board starts a setup access point only when LAN Wi-Fi credentials are missing or the LAN join fails. The setup AP is named `ReachyEyes-S3` with password `reachyeyes`; its URL is usually:
 
 ```text
 http://192.168.4.1/
 ```
 
-From that AP page, use the Wi-Fi card to enter your LAN SSID and password. The password field is plain text for easy bench setup. The board saves those credentials in ESP32 non-volatile storage and reboots; saved passwords are not returned by the status API. Use **Clear Saved** to remove stored credentials and reboot back to the compile-time/default behavior. Set `REACHY_AP_ALWAYS_ON` to `0` in `include/reachy_config.h` if you want the AP to appear only as a fallback.
+From that AP page, use the Wi-Fi card to enter your LAN SSID and password. The password field is plain text for easy bench setup. The board saves those credentials in ESP32 non-volatile storage and reboots; saved passwords are not returned by the status API. Use **Clear Saved** to remove stored credentials and reboot back to the compile-time/default behavior. Set `REACHY_AP_ALWAYS_ON` to `1` in `include/reachy_config.h` only if you want the AP to stay available while the board is on your LAN.
 
-When station Wi-Fi succeeds, the serial monitor prints both the setup AP and LAN address:
+When station Wi-Fi succeeds, the serial monitor prints the LAN address:
 
 ```text
-WiFi AP SSID: ReachyEyes-S3
-Face UI AP URL: http://192.168.4.1/
 WiFi IP: 192.168.x.x
 Face UI URL: http://192.168.x.x/
 mDNS URL: http://reachyeyes-s3.local/
