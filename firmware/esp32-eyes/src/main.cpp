@@ -2649,10 +2649,17 @@ void addState(JsonDocument &doc, uint32_t now) {
   JsonObject wifi = doc["wifi"].to<JsonObject>();
   const bool stationConnected = WiFi.status() == WL_CONNECTED;
   const wifi_mode_t mode = WiFi.getMode();
-  wifi["mode"] = stationConnected ? "station" : (mode == WIFI_AP ? "ap" : mode == WIFI_OFF ? "off" : "connecting");
+  const bool accessPointEnabled = mode == WIFI_AP || mode == WIFI_AP_STA;
+  wifi["mode"] = stationConnected && accessPointEnabled ? "ap+station"
+                 : stationConnected                  ? "station"
+                 : accessPointEnabled                ? "ap"
+                 : mode == WIFI_OFF                  ? "off"
+                                                      : "connecting";
   wifi["connected"] = stationConnected;
   wifi["ssid"] = stationConnected ? WiFi.SSID() : REACHY_AP_SSID;
   wifi["ip"] = stationConnected ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+  wifi["ap_ssid"] = REACHY_AP_SSID;
+  wifi["ap_ip"] = WiFi.softAPIP().toString();
   wifi["hostname"] = REACHY_HOSTNAME;
   wifi["mdns_url"] = String("http://") + REACHY_HOSTNAME + ".local/";
   wifi["saved_credentials"] = hasSavedWifi();
@@ -3083,6 +3090,17 @@ void setupHttpRoutes() {
   });
 }
 
+void startConfigAccessPoint() {
+  WiFi.softAP(REACHY_AP_SSID, REACHY_AP_PASSWORD);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  Serial.printf("WiFi AP SSID: %s\n", REACHY_AP_SSID);
+  Serial.print("WiFi AP IP: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.print("Face UI AP URL: http://");
+  Serial.print(WiFi.softAPIP());
+  Serial.println("/");
+}
+
 void setupWiFi() {
 #if REACHY_WIFI_ENABLED
   String savedSsid;
@@ -3090,9 +3108,16 @@ void setupWiFi() {
   loadSavedWifi(savedSsid, savedPassword);
   const char *stationSsid = savedSsid.length() > 0 ? savedSsid.c_str() : REACHY_WIFI_SSID;
   const char *stationPassword = savedSsid.length() > 0 ? savedPassword.c_str() : REACHY_WIFI_PASSWORD;
+  bool accessPointStarted = false;
 
   if (strlen(stationSsid) > 0) {
+#if REACHY_AP_ALWAYS_ON
+    WiFi.mode(WIFI_AP_STA);
+    startConfigAccessPoint();
+    accessPointStarted = true;
+#else
     WiFi.mode(WIFI_STA);
+#endif
     WiFi.setHostname(REACHY_HOSTNAME);
     WiFi.begin(stationSsid, stationPassword);
     Serial.printf("Connecting to WiFi SSID %s", stationSsid);
@@ -3120,14 +3145,12 @@ void setupWiFi() {
     }
   }
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(REACHY_AP_SSID, REACHY_AP_PASSWORD);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  Serial.print("WiFi AP IP: ");
-  Serial.println(WiFi.softAPIP());
-  Serial.print("Face UI URL: http://");
-  Serial.print(WiFi.softAPIP());
-  Serial.println("/");
+  if (!accessPointStarted) {
+    WiFi.mode(WIFI_AP);
+    startConfigAccessPoint();
+  } else {
+    Serial.println("LAN WiFi not connected; setup AP remains available.");
+  }
 #else
   WiFi.mode(WIFI_OFF);
   Serial.println("WiFi disabled (REACHY_WIFI_ENABLED=0)");

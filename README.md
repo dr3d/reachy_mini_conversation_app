@@ -218,9 +218,9 @@ Configure the base URL in `.env`:
 REACHY_MINI_EYES_BASE_URL=http://reachyeyes-s3.local/
 ```
 
-The bundled firmware config leaves station Wi-Fi credentials empty, so the board starts the `ReachyEyes-S3`
-access point with password `reachyeyes`; the default AP URL is usually `http://192.168.4.1/`. Open that page to
-save LAN Wi-Fi credentials through the built-in test panel, then the board reboots onto your network. For
+The bundled firmware keeps the `ReachyEyes-S3` setup access point available by default, with password
+`reachyeyes`; the AP URL is usually `http://192.168.4.1/`. Open that page to save LAN Wi-Fi credentials through
+the built-in test panel, then the board reboots and joins your network while the setup AP remains available. For
 compile-time credentials instead, copy `firmware/esp32-eyes/include/reachy_config_private.example.h` to
 `firmware/esp32-eyes/include/reachy_config_private.h`, fill in `REACHY_WIFI_SSID` and
 `REACHY_WIFI_PASSWORD`, then rebuild and flash. The private header is ignored by git.

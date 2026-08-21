@@ -46,6 +46,10 @@
 #define REACHY_AP_PASSWORD "reachyeyes"
 #endif
 
+#ifndef REACHY_AP_ALWAYS_ON
+#define REACHY_AP_ALWAYS_ON 1
+#endif
+
 #ifndef REACHY_HOSTNAME
 #define REACHY_HOSTNAME "reachyeyes-s3"
 #endif
