@@ -6,6 +6,8 @@
 #include <Adafruit_GC9A01A.h>
 #include <Adafruit_GFX.h>
 #include <esp_system.h>
+#include <ESPmDNS.h>
+#include <Preferences.h>
 #include <ctype.h>
 #include <math.h>
 #include <pgmspace.h>
@@ -195,6 +197,16 @@ select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(
 </div>
 </div>
 <div class="card">
+<h2>Wi-Fi</h2>
+<div class="row"><label>Status</label><span id="wifiStatus">loading</span></div>
+<div class="row"><label for="ssid">LAN SSID</label><input id="ssid" autocomplete="off" placeholder="Your Wi-Fi name"></div>
+<div class="row"><label for="wifiPass">Password</label><input id="wifiPass" type="password" autocomplete="new-password" placeholder="Leave blank for open network"></div>
+<div class="actions">
+<button class="primary" id="wifiSave">Save & Reboot</button>
+<button class="warn" id="wifiClear">Clear Saved</button>
+</div>
+</div>
+<div class="card">
 <h2>Status</h2>
 <div id="status" class="status">loading...</div>
 <div class="actions"><button id="refresh">Refresh</button></div>
@@ -208,7 +220,7 @@ function fill(id,values){$(id).innerHTML=values.map(v=>'<option value="'+v+'">'+
 async function values(path,key,id){try{const r=await fetch(path);const j=await r.json();fill(id,j[key]||fallback[id])}catch(e){fill(id,fallback[id])}}
 async function post(path,payload={}){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json().catch(()=>({ok:false,error:"bad json"}));if(!r.ok||j.ok===false)throw new Error(j.error||r.statusText);render(j);return j}
 function number(id){return Number($(id).value)}
-function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const gaze=j.gaze||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("bright").value=j.brightness_percent??$("bright").value}
+function render(j){if(!j||!j.ok)return;const mouth=j.mouth||{};const wifi=j.wifi||{};$("dot").className="dot ok";$("summary").textContent=j.mood+" / "+j.style+" / "+mouth.style+" "+mouth.shape;$("status").textContent=JSON.stringify(j,null,2);$("bright").value=j.brightness_percent??$("bright").value;$("wifiStatus").textContent=(wifi.mode||"?")+" "+(wifi.ip||"")+" "+(wifi.saved_credentials?"saved":"")}
 async function refresh(){try{const r=await fetch("/state");render(await r.json())}catch(e){$("dot").className="dot bad";$("summary").textContent=e.message;$("status").textContent=e.stack||e.message}}
 function payloadFromButton(b){const p={};if(b.dataset.select)p[b.dataset.key||"name"]=$(b.dataset.select).value;if(b.dataset.duration)p.duration=number(b.dataset.duration);return p}
 document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;try{
@@ -230,6 +242,8 @@ else if(b.id==="sleep")await post("/sleep",{duration:0});
 else if(b.id==="release")await post("/release",{});
 else if(b.id==="brightApply")await post("/control",{brightness_percent:number("bright")});
 else if(b.id==="flip")await post("/control",{flip:"toggle"});
+else if(b.id==="wifiSave")await post("/wifi",{ssid:$("ssid").value,password:$("wifiPass").value});
+else if(b.id==="wifiClear")await post("/wifi",{clear:true});
 else if(b.id==="refresh")await refresh();
 }catch(err){$("dot").className="dot bad";$("summary").textContent=err.message;$("status").textContent=err.stack||err.message}});
 async function init(){await Promise.all([values("/styles","styles","style"),values("/moods","moods","mood"),values("/beats","beats","beat"),values("/mouth_styles","mouth_styles","mouthStyle"),values("/mouth_shapes","mouth_shapes","mouthShape")]);await refresh();setInterval(refresh,2500)}
@@ -820,6 +834,7 @@ EyeRenderStyle eyeRenderStyle = EyeRenderStyle::Friendly;
 float pupilRadius = 16.0f;
 uint32_t lastFrame = 0;
 uint32_t lastUpdate = 0;
+uint32_t restartAt = 0;
 
 Vec3 pickGazeTarget(Mood mood) {
   switch (mood) {
@@ -2577,6 +2592,39 @@ bool jsonBool(JsonVariantConst value, bool defaultValue) {
   return defaultValue;
 }
 
+void loadSavedWifi(String &ssid, String &password) {
+  Preferences preferences;
+  if (!preferences.begin("reachy-wifi", true)) return;
+  ssid = preferences.getString("ssid", "");
+  password = preferences.getString("password", "");
+  preferences.end();
+}
+
+bool hasSavedWifi() {
+  String ssid;
+  String password;
+  loadSavedWifi(ssid, password);
+  return ssid.length() > 0;
+}
+
+bool saveWifiCredentials(const String &ssid, const String &password) {
+  Preferences preferences;
+  if (!preferences.begin("reachy-wifi", false)) return false;
+  preferences.putString("ssid", ssid);
+  preferences.putString("password", password);
+  preferences.end();
+  return true;
+}
+
+bool clearSavedWifiCredentials() {
+  Preferences preferences;
+  if (!preferences.begin("reachy-wifi", false)) return false;
+  preferences.remove("ssid");
+  preferences.remove("password");
+  preferences.end();
+  return true;
+}
+
 bool releaseToken(const char *text) {
   return equalsIgnoreCase(text, "auto") || equalsIgnoreCase(text, "idle") ||
          equalsIgnoreCase(text, "random") || equalsIgnoreCase(text, "neutral");
@@ -2597,6 +2645,17 @@ void addState(JsonDocument &doc, uint32_t now) {
   doc["director"] = idleBeatName(idleDirector.beat);
   doc["brightness_percent"] = apiState.brightnessPercent;
   doc["brightness"] = float(apiState.brightnessPercent) / 100.0f;
+
+  JsonObject wifi = doc["wifi"].to<JsonObject>();
+  const bool stationConnected = WiFi.status() == WL_CONNECTED;
+  const wifi_mode_t mode = WiFi.getMode();
+  wifi["mode"] = stationConnected ? "station" : (mode == WIFI_AP ? "ap" : mode == WIFI_OFF ? "off" : "connecting");
+  wifi["connected"] = stationConnected;
+  wifi["ssid"] = stationConnected ? WiFi.SSID() : REACHY_AP_SSID;
+  wifi["ip"] = stationConnected ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+  wifi["hostname"] = REACHY_HOSTNAME;
+  wifi["mdns_url"] = String("http://") + REACHY_HOSTNAME + ".local/";
+  wifi["saved_credentials"] = hasSavedWifi();
 
   JsonObject mouth = doc["mouth"].to<JsonObject>();
   mouth["present"] = bool(REACHY_HAS_MOUTH);
@@ -2619,6 +2678,48 @@ void addState(JsonDocument &doc, uint32_t now) {
 void handleHttpState() {
   JsonDocument doc;
   addState(doc, millis());
+  sendJson(doc);
+}
+
+void handleHttpWifi() {
+  JsonDocument doc;
+  if (server.method() == HTTP_GET) {
+    addState(doc, millis());
+    sendJson(doc);
+    return;
+  }
+  if (!parseBody(doc)) return;
+
+  if (jsonBool(doc["clear"], false)) {
+    if (!clearSavedWifiCredentials()) {
+      sendError("failed to clear wifi credentials", 500);
+      return;
+    }
+    doc.clear();
+    addState(doc, millis());
+    doc["message"] = "saved wifi credentials cleared; rebooting";
+    doc["restart_scheduled"] = true;
+    restartAt = millis() + 900;
+    sendJson(doc);
+    return;
+  }
+
+  const char *ssid = doc["ssid"] | "";
+  const char *password = doc["password"] | "";
+  if (ssid == nullptr || ssid[0] == '\0') {
+    sendError("wifi ssid required");
+    return;
+  }
+  if (!saveWifiCredentials(String(ssid), String(password == nullptr ? "" : password))) {
+    sendError("failed to save wifi credentials", 500);
+    return;
+  }
+
+  doc.clear();
+  addState(doc, millis());
+  doc["message"] = "wifi credentials saved; rebooting";
+  doc["restart_scheduled"] = true;
+  restartAt = millis() + 900;
   sendJson(doc);
 }
 
@@ -2918,6 +3019,7 @@ void setupHttpRoutes() {
   });
   server.on("/health", HTTP_GET, [] { sendOk("healthy"); });
   server.on("/state", HTTP_GET, handleHttpState);
+  server.on("/wifi", HTTP_GET, handleHttpWifi);
 
   server.on("/moods", HTTP_GET, [] {
     static const char *const values[] = {
@@ -2969,6 +3071,7 @@ void setupHttpRoutes() {
   server.on("/blink", HTTP_POST, handleHttpBlinkEndpoint);
   server.on("/wink", HTTP_POST, handleHttpWinkEndpoint);
   server.on("/sleep", HTTP_POST, handleHttpSleepEndpoint);
+  server.on("/wifi", HTTP_POST, handleHttpWifi);
 
   server.onNotFound([] {
     if (server.method() == HTTP_OPTIONS) {
@@ -2982,10 +3085,17 @@ void setupHttpRoutes() {
 
 void setupWiFi() {
 #if REACHY_WIFI_ENABLED
-  if (strlen(REACHY_WIFI_SSID) > 0) {
+  String savedSsid;
+  String savedPassword;
+  loadSavedWifi(savedSsid, savedPassword);
+  const char *stationSsid = savedSsid.length() > 0 ? savedSsid.c_str() : REACHY_WIFI_SSID;
+  const char *stationPassword = savedSsid.length() > 0 ? savedPassword.c_str() : REACHY_WIFI_PASSWORD;
+
+  if (strlen(stationSsid) > 0) {
     WiFi.mode(WIFI_STA);
-    WiFi.begin(REACHY_WIFI_SSID, REACHY_WIFI_PASSWORD);
-    Serial.printf("Connecting to WiFi SSID %s", REACHY_WIFI_SSID);
+    WiFi.setHostname(REACHY_HOSTNAME);
+    WiFi.begin(stationSsid, stationPassword);
+    Serial.printf("Connecting to WiFi SSID %s", stationSsid);
     const uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 12000) {
       delay(250);
@@ -2997,6 +3107,15 @@ void setupWiFi() {
       WiFi.setTxPower(WIFI_POWER_8_5dBm);
       Serial.print("WiFi IP: ");
       Serial.println(WiFi.localIP());
+      Serial.print("Face UI URL: http://");
+      Serial.print(WiFi.localIP());
+      Serial.println("/");
+      if (MDNS.begin(REACHY_HOSTNAME)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("mDNS URL: http://%s.local/\n", REACHY_HOSTNAME);
+      } else {
+        Serial.println("mDNS start failed");
+      }
       return;
     }
   }
@@ -3006,6 +3125,9 @@ void setupWiFi() {
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   Serial.print("WiFi AP IP: ");
   Serial.println(WiFi.softAPIP());
+  Serial.print("Face UI URL: http://");
+  Serial.print(WiFi.softAPIP());
+  Serial.println("/");
 #else
   WiFi.mode(WIFI_OFF);
   Serial.println("WiFi disabled (REACHY_WIFI_ENABLED=0)");
@@ -3100,6 +3222,11 @@ void loop() {
   pollFlipButton(now);
   pollSerialApi();
   server.handleClient();
+  if (restartAt != 0 && deadlineReached(now, restartAt)) {
+    Serial.println("Restarting to apply WiFi settings.");
+    delay(50);
+    ESP.restart();
+  }
   updateBehavior(now);
 
   if (now - lastFrame < 33) {

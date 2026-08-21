@@ -46,6 +46,10 @@
 #define REACHY_AP_PASSWORD "reachyeyes"
 #endif
 
+#ifndef REACHY_HOSTNAME
+#define REACHY_HOSTNAME "reachyeyes-s3"
+#endif
+
 #ifndef REACHY_SPI_HZ
 #define REACHY_SPI_HZ 40000000
 #endif

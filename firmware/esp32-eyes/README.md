@@ -32,6 +32,18 @@ If no station Wi-Fi credentials are set, the board starts an access point named 
 http://192.168.4.1/
 ```
 
+From that AP page, use the Wi-Fi card to enter your LAN SSID and password. The board saves those credentials in ESP32 non-volatile storage and reboots. The saved password is never shown back in the UI or API response. Use **Clear Saved** to remove stored credentials and reboot back to the compile-time/default behavior.
+
+When station Wi-Fi succeeds, the serial monitor prints the LAN address:
+
+```text
+WiFi IP: 192.168.x.x
+Face UI URL: http://192.168.x.x/
+mDNS URL: http://reachyeyes-s3.local/
+```
+
+Use the printed IP if `.local` name resolution is unavailable on your computer or network.
+
 ## Browser Test Panel
 
 Open the board root URL to control the face directly:
@@ -87,4 +99,3 @@ REACHY_MINI_EYES_BASE_URL=http://reachyeyes-s3.local/
 ```
 
 The app then sends high-level cues through the `set_eyes` tool and automatic conversation/motion choreography. The firmware owns rendering and animation timing.
-
