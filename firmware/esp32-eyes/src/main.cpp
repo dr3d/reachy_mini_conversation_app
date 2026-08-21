@@ -2045,11 +2045,17 @@ void renderRobotMouth(MouthShape shape, uint32_t now) {
   frame.fillRoundRect(8, 54, 224, 132, 34, rgb(0, 8, 16));
   frame.drawRoundRect(9, 55, 222, 130, 33, rgb(30, 118, 132));
   frame.drawRoundRect(15, 61, 210, 118, 28, rgb(12, 58, 78));
-  for (uint8_t i = 0; i < 11; ++i) {
-    const int16_t x = 28 + int16_t(i) * 18;
+  constexpr uint8_t barCount = 11;
+  constexpr int16_t barW = 12;
+  constexpr int16_t barGap = 6;
+  constexpr int16_t barStep = barW + barGap;
+  constexpr int16_t barsW = barCount * barW + (barCount - 1) * barGap;
+  const int16_t barsX = CX - barsW / 2;
+  for (uint8_t i = 0; i < barCount; ++i) {
+    const int16_t x = barsX + int16_t(i) * barStep;
     const float wave = 0.35f + 0.65f * fabsf(sinf(float(now) * 0.009f + float(i) * 0.8f));
     const int16_t barH = int16_t(12.0f + 80.0f * max(beat, pose.open) * wave);
-    frame.fillRoundRect(x, 120 - barH / 2, 12, barH, 6, rgb(44, 220, 232));
+    frame.fillRoundRect(x, 120 - barH / 2, barW, barH, 6, rgb(44, 220, 232));
     frame.drawFastVLine(x + 4, 120 - barH / 2 + 5, maxi16(1, barH - 10), rgb(132, 248, 255));
   }
 }
