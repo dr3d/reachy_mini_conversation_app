@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import importlib
 from typing import Any
@@ -68,6 +69,11 @@ def extract_youtube_video_id(value: str) -> str:
     return video_id
 
 
+def _is_youtube_pairing_error(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return "get_lounge_token_batch" in message or "screen_ids parameter error" in message
+
+
 class CastMediaClient:
     """Search YouTube and control a local Chromecast-compatible receiver."""
 
@@ -120,9 +126,18 @@ class CastMediaClient:
                 return {"error": f"Cast device not found: {target}", "target": target, "devices": devices}
             cast.wait(timeout=self.settings.timeout_s)
             youtube = importlib.import_module("pychromecast.controllers.youtube")
-            controller = youtube.YouTubeController(timeout=self.settings.timeout_s)
-            cast.register_handler(controller)
-            controller.play_video(selected_video_id)
+            try:
+                self._play_youtube_video(cast, youtube, selected_video_id)
+                recovered = False
+            except Exception as exc:
+                if not _is_youtube_pairing_error(exc):
+                    raise
+                logger.warning("Resetting Cast receiver after YouTube pairing failure: %s", exc)
+                cast.quit_app(timeout=self.settings.timeout_s)
+                time.sleep(1.0)
+                cast.wait(timeout=self.settings.timeout_s)
+                self._play_youtube_video(cast, youtube, selected_video_id)
+                recovered = True
         except Exception as exc:
             logger.warning("Failed to cast YouTube video %s: %s", selected_video_id, exc)
             return {
@@ -141,6 +156,7 @@ class CastMediaClient:
             "url": f"https://www.youtube.com/watch?v={selected_video_id}",
             "device": self._device_payload(cast),
             "result": selected_result,
+            "recovered": recovered,
         }
 
     def show_image(
@@ -237,6 +253,11 @@ class CastMediaClient:
             if str(cast.cast_info.friendly_name).casefold() == target:
                 return cast, devices, browser
         return None, devices, browser
+
+    def _play_youtube_video(self, cast: Any, youtube: Any, video_id: str) -> None:
+        controller = youtube.YouTubeController(timeout=self.settings.timeout_s)
+        cast.register_handler(controller)
+        controller.play_video(video_id)
 
     def _search_youtube_entries(self, query: str, max_results: int) -> list[dict[str, object]]:
         if not query.strip():

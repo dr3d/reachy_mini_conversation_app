@@ -113,6 +113,60 @@ def test_play_youtube_sends_video_to_matching_cast(monkeypatch) -> None:
     fake_pychromecast.discovery.stop_discovery.assert_called_once()
 
 
+def test_play_youtube_resets_receiver_after_pairing_error(monkeypatch) -> None:
+    """Stale YouTube receiver pairing should get one app reset and retry."""
+    played: list[str] = []
+    fake_cast = SimpleNamespace(
+        cast_info=SimpleNamespace(
+            friendly_name="Living Room TV",
+            host=SimpleNamespace(host="192.168.0.45", port=8009),
+            model_name="Receiver",
+            manufacturer="Test",
+            uuid="uuid-1",
+        ),
+        wait=MagicMock(),
+        register_handler=MagicMock(),
+        quit_app=MagicMock(),
+    )
+
+    class FakeYoutubeController:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        def play_video(self, video_id: str) -> None:
+            played.append(video_id)
+            if len(played) == 1:
+                raise RuntimeError(
+                    "400 Client Error: screen_ids parameter error for url: "
+                    "https://www.youtube.com/api/lounge/pairing/get_lounge_token_batch"
+                )
+
+    fake_pychromecast = SimpleNamespace(
+        get_chromecasts=MagicMock(return_value=([fake_cast], object())),
+        discovery=SimpleNamespace(stop_discovery=MagicMock()),
+    )
+
+    def fake_import_module(name: str) -> object:
+        if name == "pychromecast":
+            return fake_pychromecast
+        if name == "pychromecast.controllers.youtube":
+            return SimpleNamespace(YouTubeController=FakeYoutubeController)
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(media_cast.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(media_cast.time, "sleep", MagicMock())
+
+    result = CastMediaClient(CastMediaSettings(timeout_s=4.0)).play_youtube(video_id="video123")
+
+    assert result["status"] == "ok"
+    assert result["recovered"] is True
+    assert played == ["video123", "video123"]
+    assert fake_cast.register_handler.call_count == 2
+    fake_cast.quit_app.assert_called_once_with(timeout=4.0)
+    media_cast.time.sleep.assert_called_once_with(1.0)
+    fake_pychromecast.discovery.stop_discovery.assert_called_once()
+
+
 def test_show_image_sends_direct_image_url_to_matching_cast(monkeypatch) -> None:
     """Direct image URLs should play through the Cast media controller."""
     media_controller = SimpleNamespace(
