@@ -51,7 +51,7 @@
 #endif
 
 #ifndef REACHY_HOSTNAME
-#define REACHY_HOSTNAME "reachyeyes-s3"
+#define REACHY_HOSTNAME "esp32-eyes"
 #endif
 
 #ifndef REACHY_SPI_HZ

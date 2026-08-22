@@ -27,6 +27,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Running the app](#running-the-app)
 - [Hardware extension sandboxes](#hardware-extension-sandboxes)
 - [Firmware sandbox](#firmware-sandbox)
+- [ESP32 chassis firmware](#esp32-chassis-firmware)
 - [Local voice bridge](#local-voice-bridge)
 - [ESP32 eyes HTTP API](#esp32-eyes-http-api)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
@@ -111,8 +112,15 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
-| `REACHY_MINI_EYES_BASE_URL` | Optional HTTP base URL for ESP32/RP5 eye-display control, for example `http://192.168.4.1/` or `http://reachyeyes-s3.local/`. |
+| `REACHY_MINI_EYES_BASE_URL` | Optional HTTP base URL for ESP32/RP5 eye-display control, for example `http://192.168.4.1/` or `http://esp32-eyes.local/`. |
 | `REACHY_MINI_EYES_TIMEOUT_S` | HTTP timeout for optional eye-display control. Defaults to `0.8`. |
+| `REACHY_MINI_CHASSIS_BASE_URL` | Optional HTTP base URL for ESP32 tracked chassis control, for example `http://esp32-chassis.local/`. |
+| `REACHY_MINI_CHASSIS_TIMEOUT_S` | HTTP timeout for optional chassis control. Defaults to `0.8`. |
+
+When `HF_REALTIME_CONNECTION_MODE=deployed`, the realtime model runs through the Hugging Face session proxy, but
+hardware tools still execute inside this local app process. Keep `REACHY_MINI_EYES_BASE_URL` and
+`REACHY_MINI_CHASSIS_BASE_URL` pointed at LAN-reachable ESP32 devices; those private hardware endpoints are never
+called directly from the cloud backend.
 
 ### Hugging Face Connection Modes
 
@@ -215,8 +223,12 @@ The conversation app integrates with eye displays through the HTTP API used by t
 Configure the base URL in `.env`:
 
 ```env
-REACHY_MINI_EYES_BASE_URL=http://reachyeyes-s3.local/
+REACHY_MINI_EYES_BASE_URL=http://esp32-eyes.local/
 ```
+
+The app sends eye requests from the machine running the conversation app, even when the realtime model is using
+the deployed Hugging Face backend. The ESP32 eyes board only needs to be reachable from that machine on the local
+network.
 
 The bundled firmware starts the `ReachyEyes-S3` setup access point only when LAN Wi-Fi credentials are missing or
 the LAN join fails. The AP password is `reachyeyes`, and its URL is usually `http://192.168.4.1/`. Open that page
@@ -235,6 +247,46 @@ layout shares GPIO4/5/6/7 for SCLK/MOSI/DC/RST, with GPIO15/16/17 reserved for l
 The firmware owns animation timing, so the conversation app sends high-level HTTP intents rather than streaming
 frames.
 
+## ESP32 chassis firmware
+
+`firmware/esp32-chassis/` contains the ESP32-S3 tracked chassis firmware imported from the sibling
+`reachy_eyes/esp32-chassis` project. It is an optional mobility sandbox for a two-track base, not a required
+conversation app dependency.
+
+The chassis firmware owns the motor loop and safety limits on-device: normalized tank/twist commands, duty cap,
+slew limiting, watchdog stop, serial commands, UDP drive commands, a browser drive pad, HTTP endpoints, and OTA.
+Build and upload it with PlatformIO:
+
+```bash
+cd firmware/esp32-chassis
+pio run
+pio run -t upload
+pio device monitor
+```
+
+For local Wi-Fi credentials, copy `firmware/esp32-chassis/include/chassis_config_private.example.h` to
+`firmware/esp32-chassis/include/chassis_config_private.h`, fill in `CHASSIS_WIFI_SSID` and
+`CHASSIS_WIFI_PASSWORD`, then rebuild and flash. The private header is ignored by git. If Wi-Fi is left empty,
+the firmware stays serial-only.
+
+The board listens for UDP text commands on port `4210` (`T <left> <right>`, `D <v> <w>`, `S`, `E`, `C`) and
+serves a browser pad plus JSON API at `/api/status`, `/api/tank`, `/api/twist`, `/api/stop`, `/api/estop`, and
+`/api/clear` when connected to Wi-Fi. Current ESP32-S3 motor pins and safety constants are defined in
+`firmware/esp32-chassis/include/chassis_config.h`.
+
+The conversation app can integrate with the chassis through the same HTTP API. Configure the base URL in `.env`:
+
+```env
+REACHY_MINI_CHASSIS_BASE_URL=http://esp32-chassis.local/
+```
+
+Like the eyes integration, chassis control is a local hardware tool: the deployed Hugging Face backend may decide
+to call `set_chassis`, but the HTTP request to the ESP32 board is made by this app on your LAN.
+
+The app then exposes `set_chassis` for explicit drive-base requests. The tool supports status, stop, e-stop,
+clear, tank drive, and twist drive. Short-duration drive commands pass a bounded `duration_ms` to the firmware so
+the ESP32 owns the timed stop, then the app sends a final stop as a belt-and-suspenders cleanup.
+
 ## Local voice bridge
 
 `local_voice_bridge/` is an experimental sidecar for running the app against a local OpenAI-compatible realtime
@@ -247,14 +299,14 @@ The ESP32 eyes API is intentionally high-level. The app sends semantic cues over
 rendering, easing, blinking, idle beats, gaze projection, and display orientation. Query these
 endpoints on a running board to get the firmware's current value lists:
 
-Open the board root URL in a browser, such as `http://reachyeyes-s3.local/` or `http://192.168.4.1/`, for a
+Open the board root URL in a browser, such as `http://esp32-eyes.local/` or `http://192.168.4.1/`, for a
 small built-in test panel. It gives direct controls for eye style, mood/expression, idle beats, mouth
 style/shape/talking energy, gaze, blink/wink, sleep, release, and display flip.
 Eye style, mouth style, idle mode, and display flip are saved as reusable firmware preferences and restored after
 reboot; expressions, gaze, blinks, winks, sleep, and one-off mouth shapes remain temporary.
 
 ```bash
-EYES_URL=http://reachyeyes-s3.local
+EYES_URL=http://esp32-eyes.local
 curl "$EYES_URL/state"
 curl "$EYES_URL/styles"
 curl "$EYES_URL/emotions"
@@ -286,7 +338,7 @@ routine choreography visible briefly so automatic speaking/listening cues do not
 Common HTTP examples:
 
 ```bash
-EYES_URL=http://reachyeyes-s3.local
+EYES_URL=http://esp32-eyes.local
 
 curl -X POST "$EYES_URL/style" \
   -H "Content-Type: application/json" \
@@ -407,6 +459,7 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
 | `set_eyes` | Control optional ESP32/RP5 face displays through their HTTP API. | Requires `REACHY_MINI_EYES_BASE_URL`. |
+| `set_chassis` | Control optional ESP32 tracked chassis through its HTTP API. | Requires `REACHY_MINI_CHASSIS_BASE_URL`. |
 | `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |
 | `go_to_sleep` | Run Reachy's sleep movement and stop the current app after an explicit user request. | Core install only. |
 | `sweep_look` | Sweep Reachy's head left, right, and back to center. | Shared tool, enabled by default in the default profile. |

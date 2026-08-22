@@ -138,8 +138,13 @@ DEFAULT_APP_TIMEOUT_MINUTES = 1440.0
 ESP32_EYES_ENABLED_ENV = "REACHY_MINI_EYES_ENABLED"
 ESP32_EYES_BASE_URL_ENV = "REACHY_MINI_EYES_BASE_URL"
 ESP32_EYES_TIMEOUT_S_ENV = "REACHY_MINI_EYES_TIMEOUT_S"
-DEFAULT_ESP32_EYES_BASE_URL = "http://reachyeyes-s3.local/"
+DEFAULT_ESP32_EYES_BASE_URL = "http://esp32-eyes.local/"
 DEFAULT_ESP32_EYES_TIMEOUT_S = 0.8
+ESP32_CHASSIS_ENABLED_ENV = "REACHY_MINI_CHASSIS_ENABLED"
+ESP32_CHASSIS_BASE_URL_ENV = "REACHY_MINI_CHASSIS_BASE_URL"
+ESP32_CHASSIS_TIMEOUT_S_ENV = "REACHY_MINI_CHASSIS_TIMEOUT_S"
+DEFAULT_ESP32_CHASSIS_BASE_URL = "http://esp32-chassis.local/"
+DEFAULT_ESP32_CHASSIS_TIMEOUT_S = 0.8
 
 
 def resolve_app_timeout_minutes() -> float | None:
@@ -354,6 +359,9 @@ class Config:
     ESP32_EYES_ENABLED = _env_flag(ESP32_EYES_ENABLED_ENV, default=False)
     ESP32_EYES_BASE_URL = os.getenv(ESP32_EYES_BASE_URL_ENV)
     ESP32_EYES_TIMEOUT_S = _env_float(ESP32_EYES_TIMEOUT_S_ENV, DEFAULT_ESP32_EYES_TIMEOUT_S)
+    ESP32_CHASSIS_ENABLED = _env_flag(ESP32_CHASSIS_ENABLED_ENV, default=False)
+    ESP32_CHASSIS_BASE_URL = os.getenv(ESP32_CHASSIS_BASE_URL_ENV)
+    ESP32_CHASSIS_TIMEOUT_S = _env_float(ESP32_CHASSIS_TIMEOUT_S_ENV, DEFAULT_ESP32_CHASSIS_TIMEOUT_S)
 
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
 
@@ -454,6 +462,9 @@ def refresh_runtime_config_from_env() -> None:
     config.ESP32_EYES_ENABLED = _env_flag(ESP32_EYES_ENABLED_ENV, default=False)
     config.ESP32_EYES_BASE_URL = os.getenv(ESP32_EYES_BASE_URL_ENV)
     config.ESP32_EYES_TIMEOUT_S = _env_float(ESP32_EYES_TIMEOUT_S_ENV, DEFAULT_ESP32_EYES_TIMEOUT_S)
+    config.ESP32_CHASSIS_ENABLED = _env_flag(ESP32_CHASSIS_ENABLED_ENV, default=False)
+    config.ESP32_CHASSIS_BASE_URL = os.getenv(ESP32_CHASSIS_BASE_URL_ENV)
+    config.ESP32_CHASSIS_TIMEOUT_S = _env_float(ESP32_CHASSIS_TIMEOUT_S_ENV, DEFAULT_ESP32_CHASSIS_TIMEOUT_S)
 
 
 def get_available_voices() -> list[str]:
@@ -491,6 +502,21 @@ def get_esp32_eyes_base_url() -> str | None:
 def get_esp32_eyes_timeout_s() -> float:
     """Return the configured ESP32 eyes HTTP timeout."""
     return float(getattr(config, "ESP32_EYES_TIMEOUT_S", DEFAULT_ESP32_EYES_TIMEOUT_S))
+
+
+def get_esp32_chassis_base_url() -> str | None:
+    """Return the optional ESP32 chassis HTTP API base URL."""
+    value = (getattr(config, "ESP32_CHASSIS_BASE_URL", None) or "").strip()
+    if value:
+        return value
+    if bool(getattr(config, "ESP32_CHASSIS_ENABLED", False)):
+        return DEFAULT_ESP32_CHASSIS_BASE_URL
+    return None
+
+
+def get_esp32_chassis_timeout_s() -> float:
+    """Return the configured ESP32 chassis HTTP timeout."""
+    return float(getattr(config, "ESP32_CHASSIS_TIMEOUT_S", DEFAULT_ESP32_CHASSIS_TIMEOUT_S))
 
 
 def get_hf_connection_selection() -> HFConnectionSelection:

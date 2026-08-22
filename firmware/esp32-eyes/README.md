@@ -39,7 +39,7 @@ When station Wi-Fi succeeds, the serial monitor prints the LAN address:
 ```text
 WiFi IP: 192.168.x.x
 Face UI URL: http://192.168.x.x/
-mDNS URL: http://reachyeyes-s3.local/
+mDNS URL: http://esp32-eyes.local/
 ```
 
 Use the printed IP if `.local` name resolution is unavailable on your computer or network.
@@ -49,7 +49,7 @@ Use the printed IP if `.local` name resolution is unavailable on your computer o
 Open the board root URL to control the face directly:
 
 ```text
-http://reachyeyes-s3.local/
+http://esp32-eyes.local/
 ```
 
 or, on the default access point:
@@ -103,7 +103,7 @@ curl -X POST "$EYES_URL/release" -H "Content-Type: application/json" -d '{}'
 Set `EYES_URL` to the board URL first, for example:
 
 ```bash
-EYES_URL=http://reachyeyes-s3.local
+EYES_URL=http://esp32-eyes.local
 ```
 
 ## Conversation App Integration
@@ -111,7 +111,7 @@ EYES_URL=http://reachyeyes-s3.local
 In the conversation app `.env`, point the app at the board:
 
 ```env
-REACHY_MINI_EYES_BASE_URL=http://reachyeyes-s3.local/
+REACHY_MINI_EYES_BASE_URL=http://esp32-eyes.local/
 ```
 
 The app then sends high-level cues through the `set_eyes` tool and automatic conversation/motion choreography. The firmware owns rendering and animation timing.

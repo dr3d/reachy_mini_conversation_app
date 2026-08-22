@@ -91,6 +91,8 @@ def run(
         set_instance_path,
         get_esp32_eyes_base_url,
         get_esp32_eyes_timeout_s,
+        get_esp32_chassis_base_url,
+        get_esp32_chassis_timeout_s,
         get_hf_connection_selection,
         resolve_app_timeout_minutes,
         refresh_runtime_config_from_env,
@@ -172,12 +174,27 @@ def run(
         logger.info("ESP32 eyes HTTP integration enabled at %s", eyes_base_url)
         eyes_controller.cue("release")
 
+    chassis_controller = None
+    chassis_base_url = get_esp32_chassis_base_url()
+    if chassis_base_url is not None:
+        from reachy_mini_conversation_app.chassis import HttpChassisClient, HttpChassisSettings
+
+        chassis_controller = HttpChassisClient(
+            HttpChassisSettings(
+                base_url=chassis_base_url,
+                timeout_s=get_esp32_chassis_timeout_s(),
+            )
+        )
+        logger.info("ESP32 chassis HTTP integration enabled at %s", chassis_base_url)
+        chassis_controller.stop()
+
     deps = ToolDependencies(
         reachy_mini=robot,
         movement_manager=movement_manager,
         instance_path=instance_path,
         camera_enabled=not args.no_camera,
         eyes_controller=eyes_controller,
+        chassis_controller=chassis_controller,
     )
 
     def build_handler(startup_voice: Optional[str] = None) -> ConversationHandler:
@@ -243,6 +260,8 @@ def run(
             sleep_error: str | None = None
             if deps.eyes_controller is not None:
                 deps.eyes_controller.cue("sleep", {"duration": 0})
+            if deps.chassis_controller is not None:
+                deps.chassis_controller.stop()
 
             try:
                 robot.disable_wobbling()
@@ -360,6 +379,9 @@ def run(
 
         if deps.eyes_controller is not None:
             deps.eyes_controller.close()
+        if deps.chassis_controller is not None:
+            deps.chassis_controller.stop()
+            deps.chassis_controller.close()
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()

@@ -35,6 +35,9 @@ constexpr uint32_t API_DEFAULT_EXPR_MS = 8000;
 constexpr uint32_t API_DEFAULT_GAZE_HOLD_MS = 1200;
 constexpr uint32_t API_DEFAULT_GAZE_MOVE_MS = 160;
 constexpr uint32_t API_DEFAULT_MOUTH_MS = 2500;
+constexpr uint32_t MOUTH_TRANSITION_MS = 220;
+constexpr uint32_t MOUTH_TALK_ATTACK_MS = 90;
+constexpr uint32_t MOUTH_TALK_RELEASE_MS = 160;
 constexpr float API_NORMALIZED_GAZE_X_MM = 190.0f;
 constexpr float API_NORMALIZED_GAZE_Y_MM = 110.0f;
 constexpr float API_NORMALIZED_GAZE_Z_MM = 360.0f;
@@ -113,7 +116,7 @@ const char FACE_UI_HTML[] PROGMEM = R"FACEUI(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reachy Face Control</title>
+<title>Reachy Mini Face Control</title>
 <style>
 :root{color-scheme:dark;--bg:#08090d;--panel:#141720;--panel2:#10131a;--line:#2a3140;--text:#eef2f6;--muted:#9aa6b2;--accent:#55c7ff;--ok:#68d391;--warn:#f6ad55;--bad:#fc8181}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1100px;margin:0 auto;padding:16px}
@@ -128,7 +131,7 @@ select,input{width:100%;min-width:0;border:1px solid var(--line);background:var(
 <body>
 <main>
 <header>
-<div><h1>Reachy Face Control</h1><p>Direct ESP32 test panel for eyes, mouth, gaze, idle beats, and display settings.</p></div>
+<div><h1>Reachy Mini Face Control</h1><p>Direct ESP32 test panel for eyes, mouth, gaze, idle beats, and display settings.</p></div>
 <div class="pill"><span id="dot" class="dot"></span><span id="summary">connecting</span></div>
 </header>
 <section class="grid">
@@ -567,19 +570,28 @@ bool parseMouthShapeName(const char *text, MouthShape &shape) {
 }
 
 struct MouthPose {
-  float open;
-  float width;
-  float curve;
-  float skew;
-  float teeth;
-  float tension;
+  MouthPose() = default;
+  MouthPose(float openValue, float widthValue, float curveValue, float skewValue, float teethValue, float tensionValue)
+    : open(openValue),
+      width(widthValue),
+      curve(curveValue),
+      skew(skewValue),
+      teeth(teethValue),
+      tension(tensionValue) {}
+
+  float open = 0.0f;
+  float width = 0.0f;
+  float curve = 0.0f;
+  float skew = 0.0f;
+  float teeth = 0.0f;
+  float tension = 0.0f;
 };
 
 MouthPose mouthPoseFor(MouthShape shape) {
   switch (shape) {
     case MouthShape::Smile: return {0.22f, 0.78f, 0.55f, 0.0f, 0.0f, 0.16f};
-    case MouthShape::SmirkLeft: return {0.28f, 0.74f, 0.58f, -0.62f, 0.0f, 0.38f};
-    case MouthShape::SmirkRight: return {0.28f, 0.74f, 0.58f, 0.62f, 0.0f, 0.38f};
+    case MouthShape::SmirkLeft: return {0.22f, 0.70f, 0.70f, -0.92f, 0.0f, 0.48f};
+    case MouthShape::SmirkRight: return {0.22f, 0.70f, 0.70f, 0.92f, 0.0f, 0.48f};
     case MouthShape::Open: return {0.58f, 0.64f, 0.05f, 0.0f, 0.0f, 0.18f};
     case MouthShape::Wide: return {0.84f, 0.76f, 0.04f, 0.0f, 0.0f, 0.22f};
     case MouthShape::Frown: return {0.18f, 0.64f, -0.54f, 0.0f, 0.0f, 0.30f};
@@ -589,6 +601,17 @@ MouthPose mouthPoseFor(MouthShape shape) {
     case MouthShape::Neutral:
     default: return {0.12f, 0.60f, 0.0f, 0.0f, 0.0f, 0.12f};
   }
+}
+
+MouthPose mixMouthPose(const MouthPose &a, const MouthPose &b, float t) {
+  return {
+    a.open + (b.open - a.open) * t,
+    a.width + (b.width - a.width) * t,
+    a.curve + (b.curve - a.curve) * t,
+    a.skew + (b.skew - a.skew) * t,
+    a.teeth + (b.teeth - a.teeth) * t,
+    a.tension + (b.tension - a.tension) * t
+  };
 }
 
 MouthShape mouthShapeForMood(Mood mood) {
@@ -784,10 +807,18 @@ struct ApiState {
 struct MouthState {
   MouthStyle style = MouthStyle::Human;
   MouthShape shape = MouthShape::Neutral;
+  MouthShape renderedShape = MouthShape::Neutral;
   bool overrideShape = false;
   bool talking = false;
+  bool poseInitialized = false;
   uint32_t overrideUntil = 0;
+  uint32_t poseStarted = 0;
+  uint32_t talkUpdated = 0;
   float energy = 0.45f;
+  float talkLevel = 0.0f;
+  MouthPose poseFrom;
+  MouthPose poseTo;
+  MouthPose poseNow;
 };
 
 struct ButtonState {
@@ -1945,11 +1976,40 @@ void updateMouth(uint32_t now) {
     mouthState.overrideShape = false;
     mouthState.talking = false;
   }
+  if (mouthState.talkUpdated == 0) mouthState.talkUpdated = now;
+  const uint32_t elapsed = now - mouthState.talkUpdated;
+  mouthState.talkUpdated = now;
+  const float target = mouthState.talking ? 1.0f : 0.0f;
+  const uint32_t rateMs = target > mouthState.talkLevel ? MOUTH_TALK_ATTACK_MS : MOUTH_TALK_RELEASE_MS;
+  const float step = rateMs == 0 ? 1.0f : clampf(float(elapsed) / float(rateMs), 0.0f, 1.0f);
+  mouthState.talkLevel += (target - mouthState.talkLevel) * step;
 }
 
 MouthShape activeMouthShape(uint32_t now) {
   if (mouthState.overrideShape) return mouthState.shape;
   return mouthShapeForMood(currentMood(now));
+}
+
+MouthPose easedMouthPose(MouthShape shape, uint32_t now) {
+  const MouthPose target = mouthPoseFor(shape);
+  if (!mouthState.poseInitialized) {
+    mouthState.renderedShape = shape;
+    mouthState.poseFrom = target;
+    mouthState.poseTo = target;
+    mouthState.poseNow = target;
+    mouthState.poseStarted = now;
+    mouthState.poseInitialized = true;
+    return target;
+  }
+  if (shape != mouthState.renderedShape) {
+    mouthState.renderedShape = shape;
+    mouthState.poseFrom = mouthState.poseNow;
+    mouthState.poseTo = target;
+    mouthState.poseStarted = now;
+  }
+  const float t = smoothstep(float(now - mouthState.poseStarted) / float(MOUTH_TRANSITION_MS));
+  mouthState.poseNow = mixMouthPose(mouthState.poseFrom, mouthState.poseTo, t);
+  return mouthState.poseNow;
 }
 
 void drawMouthTeeth(int16_t x, int16_t y, int16_t w, int16_t h, float amount) {
@@ -1972,18 +2032,18 @@ void drawMouthTongue(int16_t cx, int16_t y, int16_t rx, int16_t ry) {
   fillEllipse(frame, cx - rx / 5, y - ry / 4, maxi16(4, rx / 3), maxi16(2, ry / 4), tongueHi);
 }
 
-void renderHumanMouth(MouthShape shape, uint32_t now) {
-  MouthPose pose = mouthPoseFor(shape);
-  if (mouthState.talking) {
+void renderHumanMouth(MouthShape shape, MouthPose pose, uint32_t now) {
+  if (mouthState.talkLevel > 0.01f) {
     const float pulse = clampf(0.58f + 0.32f * sinf(float(now) * 0.037f) +
                                 0.18f * sinf(float(now) * 0.071f + 1.7f), 0.0f, 1.0f);
-    pose.open = max(pose.open, 0.18f + mouthState.energy * 0.70f * pulse);
-    pose.width = max(pose.width, 0.56f + mouthState.energy * 0.20f);
+    pose.open = max(pose.open, 0.18f + mouthState.energy * 0.70f * pulse * mouthState.talkLevel);
+    pose.width = max(pose.width, 0.56f + mouthState.energy * 0.20f * mouthState.talkLevel);
   }
 
   frame.fillScreen(BLACK);
 
-  if (shape == MouthShape::Sleep && !mouthState.talking) {
+  if (shape == MouthShape::Sleep && mouthState.talkLevel <= 0.01f &&
+      uint32_t(now - mouthState.poseStarted) >= MOUTH_TRANSITION_MS) {
     const int16_t sleepX = 18;
     const int16_t sleepY = 119;
     frame.fillRoundRect(sleepX, sleepY, 198, 15, 7, rgb(118, 28, 44));
@@ -1995,24 +2055,38 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   const int16_t w = int16_t(134.0f + pose.width * 226.0f);
   const int16_t openH = int16_t(7.0f + pose.open * 92.0f);
   const int16_t lipH = int16_t(clampf(30.0f + pose.open * 28.0f + pose.tension * 7.0f, 28.0f, 62.0f));
-  const int16_t driftX = mouthState.talking
+  const int16_t driftX = mouthState.talkLevel > 0.01f
     ? int16_t(5.0f * sinf(float(now) * 0.0031f) + 2.0f * sinf(float(now) * 0.0071f + 1.4f))
     : 0;
-  const int16_t driftY = mouthState.talking
+  const int16_t driftY = mouthState.talkLevel > 0.01f
     ? int16_t(2.0f * sinf(float(now) * 0.0027f + 0.6f))
     : 0;
-  const int16_t cx = 120 + int16_t(pose.skew * 26.0f) + driftX;
+  const bool isSmirk = shape == MouthShape::SmirkLeft || shape == MouthShape::SmirkRight;
+  const int16_t cx = 120 + int16_t(pose.skew * (isSmirk ? 48.0f : 26.0f)) + driftX;
   const int16_t cy = 126 + int16_t(pose.tension * 4.0f) + driftY;
   const int16_t curve = int16_t(pose.curve * 18.0f);
-  const int16_t asym = (mouthState.talking ? int16_t(5.0f * sinf(float(now) * 0.0041f + pose.width * 3.1f))
-                                           : 0) +
-                       int16_t(pose.skew * 12.0f);
+  const int16_t asym = (mouthState.talkLevel > 0.01f
+                          ? int16_t(5.0f * mouthState.talkLevel *
+                                    sinf(float(now) * 0.0041f + pose.width * 3.1f))
+                          : 0) +
+                       int16_t(pose.skew * (isSmirk ? 22.0f : 12.0f));
   const int16_t cavityW = int16_t(float(w) * (0.86f - pose.tension * 0.05f));
   const int16_t cavityH = maxi16(5, openH);
   const int16_t topCy = cy - cavityH / 2 - lipH / 3 - curve / 3;
   const int16_t bottomCy = cy + cavityH / 2 + lipH / 3 - curve / 5;
-  const int16_t leftCornerY = cy - curve + int16_t(pose.tension * 2.0f) + asym / 3;
-  const int16_t rightCornerY = cy - curve + int16_t(pose.tension * 2.0f) - asym / 4;
+  int16_t leftCornerY = cy - curve + int16_t(pose.tension * 2.0f) + asym / 3;
+  int16_t rightCornerY = cy - curve + int16_t(pose.tension * 2.0f) - asym / 4;
+  if (isSmirk) {
+    const int16_t lift = int16_t(fabsf(pose.skew) * 15.0f);
+    const int16_t drop = int16_t(fabsf(pose.skew) * 5.0f);
+    if (pose.skew > 0.0f) {
+      rightCornerY -= lift;
+      leftCornerY += drop;
+    } else {
+      leftCornerY -= lift;
+      rightCornerY += drop;
+    }
+  }
   const uint16_t shadow = rgb(28, 0, 10);
   const uint16_t lip = rgb(156, 38, 58);
   const uint16_t lipHi = rgb(236, 104, 112);
@@ -2047,21 +2121,22 @@ void renderHumanMouth(MouthShape shape, uint32_t now) {
   const int16_t rightX = cx + w / 2;
   frame.fillCircle(leftX + asym / 3, leftCornerY + int16_t(pose.skew * 10.0f), maxi16(9, lipH / 3), mixColor(lipLo, lip, 0.42f));
   frame.fillCircle(rightX + asym / 4, rightCornerY - int16_t(pose.skew * 10.0f), maxi16(11, lipH / 3), mixColor(lipLo, lip, 0.48f));
-  if (shape == MouthShape::SmirkLeft || shape == MouthShape::SmirkRight || shape == MouthShape::Sneer) {
+  if (isSmirk || shape == MouthShape::Sneer) {
     const bool liftRight = pose.skew > 0.0f;
-    const int16_t creaseX = liftRight ? rightX - 28 + asym / 4 : leftX + 28 + asym / 3;
-    const int16_t creaseY = liftRight ? rightCornerY - 10 : leftCornerY - 10;
+    const int16_t creaseX = liftRight ? rightX - 36 + asym / 3 : leftX + 36 + asym / 2;
+    const int16_t creaseY = liftRight ? rightCornerY - 8 : leftCornerY - 8;
     const int16_t creaseDir = liftRight ? -1 : 1;
-    frame.drawLine(creaseX, creaseY, creaseX + creaseDir * 24, creaseY - 12, lipHi);
-    frame.drawLine(creaseX - creaseDir * 2, creaseY + 6, creaseX + creaseDir * 20, creaseY + 1, lipLo);
+    const int16_t creaseLen = isSmirk ? 34 : 24;
+    frame.drawLine(creaseX, creaseY, creaseX + creaseDir * creaseLen, creaseY - 15, lipHi);
+    frame.drawLine(creaseX - creaseDir * 2, creaseY + 7, creaseX + creaseDir * (creaseLen - 4), creaseY, lipLo);
   }
   frame.drawFastHLine(cx + asym / 3 - cavityW / 2 + 12, topCy - lipH / 3 + asym / 10, maxi16(20, cavityW / 3), lipHi);
   frame.drawFastHLine(cx + asym / 4 - cavityW / 4, bottomCy + lipH / 3 - asym / 12, maxi16(20, cavityW / 2), lipLo);
 }
 
-void renderRobotMouth(MouthShape shape, uint32_t now) {
-  const MouthPose pose = mouthPoseFor(shape);
-  const float beat = mouthState.talking ? clampf(0.5f + 0.5f * sinf(float(now) * 0.05f), 0.0f, 1.0f) : pose.open;
+void renderRobotMouth(MouthShape shape, MouthPose pose, uint32_t now) {
+  const float talkBeat = clampf(0.5f + 0.5f * sinf(float(now) * 0.05f), 0.0f, 1.0f);
+  const float beat = mouthState.talkLevel > 0.01f ? pose.open + (talkBeat - pose.open) * mouthState.talkLevel : pose.open;
   frame.fillScreen(BLACK);
   frame.fillRoundRect(8, 54, 224, 132, 34, rgb(0, 8, 16));
   frame.drawRoundRect(9, 55, 222, 130, 33, rgb(30, 118, 132));
@@ -2083,10 +2158,11 @@ void renderRobotMouth(MouthShape shape, uint32_t now) {
 
 void renderMouth(uint32_t now) {
   const MouthShape shape = activeMouthShape(now);
+  const MouthPose pose = easedMouthPose(shape, now);
   if (mouthState.style == MouthStyle::Robot) {
-    renderRobotMouth(shape, now);
+    renderRobotMouth(shape, pose, now);
   } else {
-    renderHumanMouth(shape, now);
+    renderHumanMouth(shape, pose, now);
   }
 }
 
