@@ -61,6 +61,45 @@ def _start_inactivity_timeout_thread(
     return thread
 
 
+def _cue_optional_eyes(
+    eyes_controller: Any,
+    logger: logging.Logger,
+    action: str,
+    payload: dict[str, object] | None = None,
+) -> None:
+    """Best-effort cue for optional eye hardware."""
+    if eyes_controller is None:
+        return
+    try:
+        eyes_controller.cue(action, payload)
+    except Exception as exc:
+        logger.warning("Failed to cue ESP32 eyes action %s: %s", action, exc)
+
+
+def _stop_optional_chassis(chassis_controller: Any, logger: logging.Logger, reason: str) -> None:
+    """Best-effort stop for optional chassis hardware."""
+    if chassis_controller is None:
+        return
+    try:
+        result = chassis_controller.stop()
+    except Exception as exc:
+        logger.warning("Failed to stop ESP32 chassis during %s: %s", reason, exc)
+        return
+
+    if isinstance(result, dict) and "error" in result:
+        logger.warning("ESP32 chassis stop during %s reported: %s", reason, result["error"])
+
+
+def _close_optional_controller(controller: Any, logger: logging.Logger, label: str) -> None:
+    """Best-effort close for optional hardware controllers."""
+    if controller is None:
+        return
+    try:
+        controller.close()
+    except Exception as exc:
+        logger.warning("Failed to close %s controller: %s", label, exc)
+
+
 def main() -> None:
     """Entrypoint for the Reachy Mini conversation app."""
     args, _ = parse_args()
@@ -172,7 +211,7 @@ def run(
             )
         )
         logger.info("ESP32 eyes HTTP integration enabled at %s", eyes_base_url)
-        eyes_controller.cue("release")
+        _cue_optional_eyes(eyes_controller, logger, "release")
 
     chassis_controller = None
     chassis_base_url = get_esp32_chassis_base_url()
@@ -186,7 +225,7 @@ def run(
             )
         )
         logger.info("ESP32 chassis HTTP integration enabled at %s", chassis_base_url)
-        chassis_controller.stop()
+        _stop_optional_chassis(chassis_controller, logger, "startup")
 
     deps = ToolDependencies(
         reachy_mini=robot,
@@ -258,10 +297,8 @@ def run(
 
             logger.info("Going to sleep before stopping conversation app.")
             sleep_error: str | None = None
-            if deps.eyes_controller is not None:
-                deps.eyes_controller.cue("sleep", {"duration": 0})
-            if deps.chassis_controller is not None:
-                deps.chassis_controller.stop()
+            _cue_optional_eyes(deps.eyes_controller, logger, "sleep", {"duration": 0})
+            _stop_optional_chassis(deps.chassis_controller, logger, "sleep")
 
             try:
                 robot.disable_wobbling()
@@ -377,11 +414,9 @@ def run(
         except Exception as e:
             logger.debug(f"Error closing media during shutdown: {e}")
 
-        if deps.eyes_controller is not None:
-            deps.eyes_controller.close()
-        if deps.chassis_controller is not None:
-            deps.chassis_controller.stop()
-            deps.chassis_controller.close()
+        _close_optional_controller(deps.eyes_controller, logger, "ESP32 eyes")
+        _stop_optional_chassis(deps.chassis_controller, logger, "shutdown")
+        _close_optional_controller(deps.chassis_controller, logger, "ESP32 chassis")
 
         # prevent connection to keep alive some threads
         robot.client.disconnect()

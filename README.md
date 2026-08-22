@@ -28,6 +28,7 @@ Conversational app for the Reachy Mini robot combining realtime voice, vision, p
 - [Hardware extension sandboxes](#hardware-extension-sandboxes)
 - [Firmware sandbox](#firmware-sandbox)
 - [ESP32 chassis firmware](#esp32-chassis-firmware)
+- [ESP32 camera firmware](#esp32-camera-firmware)
 - [Local voice bridge](#local-voice-bridge)
 - [ESP32 eyes HTTP API](#esp32-eyes-http-api)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
@@ -286,6 +287,44 @@ to call `set_chassis`, but the HTTP request to the ESP32 board is made by this a
 The app then exposes `set_chassis` for explicit drive-base requests. The tool supports status, stop, e-stop,
 clear, tank drive, and twist drive. Short-duration drive commands pass a bounded `duration_ms` to the firmware so
 the ESP32 owns the timed stop, then the app sends a final stop as a belt-and-suspenders cleanup.
+
+## ESP32 camera firmware
+
+`firmware/esp32-cam/` contains TimerCam firmware imported from the sibling `reachy_eyes/esp32-cam` project. It is
+an optional chassis-view camera, not a required conversation app dependency.
+
+The camera firmware serves a compact browser view at `/`, a single JPEG at `/jpg`, plain text status at `/status`,
+and an MJPEG stream on port `81` at `/stream`. Build and upload it with PlatformIO:
+
+```bash
+cd firmware/esp32-cam
+pio run
+pio run -t upload
+pio device monitor
+```
+
+For local Wi-Fi credentials, copy `firmware/esp32-cam/include/cam_config_private.example.h` to
+`firmware/esp32-cam/include/cam_config_private.h`, fill in `CAM_WIFI_SSID` and `CAM_WIFI_PASSWORD`, then rebuild
+and flash. The private header is ignored by git. If Wi-Fi is left empty or fails to connect, the board starts the
+`ReachyCam` access point with URL `http://192.168.4.1/`.
+
+The default hostname is `esp32-cam`, so the camera page is normally:
+
+```text
+http://esp32-cam.local/
+```
+
+The chassis browser pad's Camera toggle defaults to `esp32-cam.local` and loads:
+
+```text
+http://esp32-cam.local:81/stream
+```
+
+After the first USB flash, future updates can be sent over Wi-Fi with:
+
+```bash
+pio run -e timer-cam-ota -t upload
+```
 
 ## Local voice bridge
 

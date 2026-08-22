@@ -40,3 +40,36 @@ def test_inactivity_timeout_thread_closes_stream_manager_without_sleep_callback(
     thread.join(timeout=1.0)
     assert not thread.is_alive()
     stream_manager.close.assert_called_once_with()
+
+
+def test_stop_optional_chassis_logs_error_result() -> None:
+    """Optional chassis stop failures should not raise into lifecycle paths."""
+    chassis_controller = SimpleNamespace(stop=MagicMock(return_value={"error": "offline"}))
+    logger = MagicMock()
+
+    main_mod._stop_optional_chassis(chassis_controller, logger, "sleep")
+
+    chassis_controller.stop.assert_called_once_with()
+    logger.warning.assert_called_once_with("ESP32 chassis stop during %s reported: %s", "sleep", "offline")
+
+
+def test_stop_optional_chassis_catches_exception() -> None:
+    """Unexpected optional chassis stop errors should remain best-effort."""
+    chassis_controller = SimpleNamespace(stop=MagicMock(side_effect=RuntimeError("boom")))
+    logger = MagicMock()
+
+    main_mod._stop_optional_chassis(chassis_controller, logger, "shutdown")
+
+    chassis_controller.stop.assert_called_once_with()
+    logger.warning.assert_called_once()
+
+
+def test_cue_optional_eyes_catches_exception() -> None:
+    """Optional eye cue failures should not raise into lifecycle paths."""
+    eyes_controller = SimpleNamespace(cue=MagicMock(side_effect=RuntimeError("boom")))
+    logger = MagicMock()
+
+    main_mod._cue_optional_eyes(eyes_controller, logger, "sleep", {"duration": 0})
+
+    eyes_controller.cue.assert_called_once_with("sleep", {"duration": 0})
+    logger.warning.assert_called_once()

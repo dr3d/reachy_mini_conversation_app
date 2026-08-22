@@ -107,13 +107,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <div class="status" id="status">connecting</div>
   </header>
   <section class="cameraControls">
-    <input class="cameraInput" id="cameraHost" value="192.168.0.252" aria-label="camera host">
+    <input class="cameraInput" id="cameraHost" value="esp32-cam.local" aria-label="camera host">
     <button id="cameraToggle">Camera</button>
-    <a id="cameraOpen" href="http://192.168.0.252/" target="_blank" rel="noreferrer">Open</a>
+    <a id="cameraOpen" href="http://esp32-cam.local/" target="_blank" rel="noreferrer">Open</a>
   </section>
   <section class="pad" id="pad" aria-label="drive pad">
     <div class="cameraFrame" id="cameraFrame">
-      <img id="cameraView" alt="TimerCam stream">
+      <img id="cameraView" alt="Reachy Mini camera stream">
     </div>
     <div class="cross"></div>
     <div class="knob" id="knob"></div>

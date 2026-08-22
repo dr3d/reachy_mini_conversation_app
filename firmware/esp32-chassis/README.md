@@ -125,7 +125,7 @@ The browser page supports touch/mouse control and the browser Gamepad API. With 
 
 The page also includes compact streamed routines: circle, orbit, triangle, back/forth, and dance. The routines use the current UI max-speed slider value for their active moves and short timed segments intended for roughly a 5x5 foot test area, but they are still open-loop. Keep the floor clear and use Stop or E-Stop if the chassis drifts.
 
-The drive pad can show the TimerCam MJPEG stream behind the joystick. Use the Camera toggle to start/stop loading `http://<camera-host>:81/stream`. Keeping it toggled off when not driving leaves the TimerCam free for OTA updates.
+The drive pad can show the ESP32 camera MJPEG stream behind the joystick. Use the Camera toggle to start/stop loading `http://<camera-host>:81/stream`; the default host is `esp32-cam.local`. Keeping it toggled off when not driving leaves the camera free for OTA updates.
 
 Robot-facing HTTP endpoints:
 
