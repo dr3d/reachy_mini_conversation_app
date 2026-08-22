@@ -111,6 +111,8 @@ Copy `.env.example` to `.env` when you want to point Hugging Face at your own lo
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for the realtime backend. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
+| `HF_REALTIME_WS_PING_INTERVAL_S` | Optional local websocket ping interval. Defaults to `60` in local mode. |
+| `HF_REALTIME_WS_PING_TIMEOUT_S` | Optional local websocket ping timeout. Defaults to `60` in local mode. |
 | `HF_TOKEN` | Optional token for Hugging Face access. Local endpoints receive only this explicitly configured token. |
 | `REACHY_MINI_APP_TIMEOUT_MINUTES` | Minutes of inactivity before Reachy goes to sleep and the app stops. Defaults to `1440` (one day); set to `0` to disable. |
 | `REACHY_MINI_EYES_BASE_URL` | Optional HTTP base URL for ESP32/RP5 eye-display control, for example `http://192.168.4.1/` or `http://esp32-eyes.local/`. |
@@ -138,6 +140,8 @@ Run your own realtime voice backend using [speech-to-speech](https://github.com/
 ```env
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
+HF_REALTIME_WS_PING_INTERVAL_S=60
+HF_REALTIME_WS_PING_TIMEOUT_S=60
 ```
 
 Run your own Hugging Face backend on your laptop and connect to it from Reachy Mini Wireless over the same Wi-Fi network:
@@ -145,6 +149,8 @@ Run your own Hugging Face backend on your laptop and connect to it from Reachy M
 ```env
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://<your-laptop-lan-ip>:8765/v1/realtime
+HF_REALTIME_WS_PING_INTERVAL_S=60
+HF_REALTIME_WS_PING_TIMEOUT_S=60
 ```
 
 For that LAN setup, make sure the backend listens on an address reachable from the robot, not only on `127.0.0.1`.
@@ -331,6 +337,100 @@ pio run -e timer-cam-ota -t upload
 `local_voice_bridge/` is an experimental sidecar for running the app against a local OpenAI-compatible realtime
 websocket backed by LM Studio plus explicit STT/TTS adapters. It is useful for local voice experiments, but it is
 not required for the default Hugging Face realtime backend. See `local_voice_bridge/README.md` for setup details.
+
+## Local Qwen3-TTS server
+
+`local_qwen3_tts_server/` is a small OpenAI-compatible `/v1/audio/speech` HTTP sidecar intended to run on the RTX
+PC. The local voice bridge can call it with `LOCAL_BRIDGE_TTS_PROVIDER=qwen3tts`, leaving the realtime websocket
+bridge lightweight while the PC GPU runs Qwen3-TTS.
+
+Start with mock audio to verify the HTTP contract:
+
+```powershell
+python -m venv local_qwen3_tts_server\.venv
+.\local_qwen3_tts_server\.venv\Scripts\Activate.ps1
+pip install -r local_qwen3_tts_server\requirements.txt
+$env:QWEN_TTS_MOCK = "1"
+python -m local_qwen3_tts_server.server
+```
+
+For real synthesis on Windows, install SoX and replace the default CPU PyTorch wheel with a CUDA build:
+
+```powershell
+winget install -e --id ChrisBagwell.SoX
+.\local_qwen3_tts_server\.venv\Scripts\python.exe -m pip install --upgrade --force-reinstall `
+  torch==2.11.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+```
+
+Then run the server:
+
+```powershell
+.\local_qwen3_tts_server\start_server.ps1 -Voice Aiden -Port 8000
+```
+
+The local voice bridge can point at the PC with:
+
+```env
+LOCAL_BRIDGE_TTS_PROVIDER=qwen3tts
+LOCAL_BRIDGE_QWEN_TTS_URL=http://192.168.0.150:8000/v1/audio/speech
+LOCAL_BRIDGE_QWEN_TTS_VOICE=Aiden
+LOCAL_BRIDGE_MAX_SPOKEN_CHARS=220
+LOCAL_BRIDGE_TTS_CHUNK_CHARS=80
+LOCAL_BRIDGE_AUDIO_DELTA_PACE=0.85
+```
+
+Useful server settings are:
+
+```env
+QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+QWEN_TTS_VOICE=Aiden
+QWEN_TTS_DEVICE_MAP=cuda:0
+```
+
+The default voice catalog is `Aiden`, `Ryan`, `Dylan`, `Eric`, `Ono_Anna`, `Serena`, `Sohee`, `Uncle_Fu`, and
+`Vivian`. Use `GET /v1/voices` to confirm the running server's defaults. Use the `0.6B-CustomVoice` model for lower
+latency; switch to `1.7B-CustomVoice` when quality matters more than response time.
+
+## Jetson realtime probe
+
+`jetson/reachy-jetson-realtime/` preserves the Jetson Orin Nano proof project used to validate a LAN realtime
+endpoint path. It is not firmware; it is a small Python websocket probe that can run on the Jetson, call Ollama
+locally or on the RTX PC, and optionally forward speech synthesis to the Qwen3-TTS HTTP server.
+
+On the Jetson:
+
+```bash
+cd /home/scott/Developer/reachy-jetson-realtime
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements.txt
+pytest -v
+python -m jetson_realtime_probe.server
+```
+
+The example config uses the RTX PC for LLM and TTS work:
+
+```env
+JETSON_REALTIME_OLLAMA_URL=http://192.168.0.150:11434
+JETSON_REALTIME_OLLAMA_MODEL=qwen3.6:27b
+JETSON_REALTIME_TTS_PROVIDER=qwen3tts_http
+JETSON_REALTIME_QWEN_TTS_URL=http://192.168.0.150:8000/v1/audio/speech
+JETSON_REALTIME_QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+JETSON_REALTIME_QWEN_TTS_VOICE=Aiden
+```
+
+Then point the conversation app at the Jetson endpoint:
+
+```env
+HF_REALTIME_CONNECTION_MODE=local
+HF_REALTIME_WS_URL=ws://jetson.local:8765/v1/realtime
+HF_REALTIME_WS_PING_INTERVAL_S=60
+HF_REALTIME_WS_PING_TIMEOUT_S=60
+```
+
+The probe's hardware/Ollama integration tests are opt-in with `JETSON_REALTIME_RUN_LIVE_TESTS=1`; protocol and TTS
+contract tests can run anywhere.
 
 ## Cast media tool
 

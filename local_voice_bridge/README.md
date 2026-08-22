@@ -110,31 +110,29 @@ Good first picks: `am_eric`, `am_liam`, `am_michael`, `af_sarah`, `af_bella`, `b
 
 ### Qwen3-TTS Notes
 
-Qwen3-TTS is not wired in yet, but the bridge is shaped for it: add a `qwen3tts` provider next to Piper and Kokoro,
-then return normal WAV/PCM through the existing `_read_wav_as_16khz_mono_pcm` path.
+Qwen3-TTS is supported through a hot OpenAI-style HTTP speech server. Start the RTX-side server first:
 
-What we learned:
+```powershell
+.\local_qwen3_tts_server\start_server.ps1 -Voice Aiden -Port 8000
+```
 
-- LM Studio listing a Qwen3-TTS model is not enough; the bridge should not assume LM Studio serves TTS audio endpoints.
-- The installed `Serveurperso/Qwen3-TTS-GGUF/qwen-tokenizer-12hz-Q8_0.gguf` is only the tokenizer/vocoder side.
-- Qwen3-TTS GGUF needs two GGUFs loaded together: `qwen-talker-{size}-{mode}-{variant}.gguf` plus
-  `qwen-tokenizer-12hz-{variant}.gguf`.
-- Start with `qwen-talker-0.6b-base-Q8_0.gguf` or `Q4_K_M` before trying the 1.7B models.
-- Prefer a hot local server first, such as `faster-qwen3-tts` server/OpenAI-compatible `/v1/audio/speech`, instead of
-  spawning the model once per utterance.
-- A likely first bridge config would be:
+Then configure the bridge to call it:
 
 ```env
 LOCAL_BRIDGE_TTS_PROVIDER=qwen3tts
-LOCAL_BRIDGE_QWEN_TTS_BACKEND=server
-LOCAL_BRIDGE_QWEN_TTS_URL=http://127.0.0.1:8000/v1/audio/speech
-LOCAL_BRIDGE_QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-Base
+LOCAL_BRIDGE_QWEN_TTS_URL=http://192.168.0.150:8000/v1/audio/speech
+LOCAL_BRIDGE_QWEN_TTS_MODEL=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+LOCAL_BRIDGE_QWEN_TTS_VOICE=Aiden
 LOCAL_BRIDGE_QWEN_TTS_LANGUAGE=English
-LOCAL_BRIDGE_QWEN_TTS_SPEAKER=aiden
+LOCAL_BRIDGE_QWEN_TTS_TIMEOUT_S=60
 ```
 
-Expected effort: 1-2 hours for a smoke test, 3-5 hours for a bridge provider that calls a hot local HTTP server, and
-1-2 days for a polished native in-process provider if Windows/CUDA dependencies need taming.
+Switch `LOCAL_BRIDGE_QWEN_TTS_VOICE` between `Aiden` and `Eric` to try the two confirmed local voices. The bridge
+receives Qwen's WAV response and converts it to the 16 kHz mono PCM expected by the realtime audio stream.
+`0.6B-CustomVoice` is the lower-latency default; use `1.7B-CustomVoice` for higher-quality experiments.
+For interactive use, keep `LOCAL_BRIDGE_MAX_SPOKEN_CHARS` low enough that routine replies fit in one or two
+sentences. Qwen3-TTS is still the slowest stage, so the bridge also exposes `LOCAL_BRIDGE_AUDIO_DELTA_PACE`,
+`LOCAL_BRIDGE_WS_PING_INTERVAL_S`, and `LOCAL_BRIDGE_WS_PING_TIMEOUT_S` to avoid cutting off longer spoken turns.
 
 On Windows, TTS falls back to SAPI if no provider is configured. For another TTS engine, set `LOCAL_BRIDGE_TTS_COMMAND` to a command that receives text and an output WAV path:
 
@@ -151,6 +149,8 @@ In the existing app environment:
 ```env
 HF_REALTIME_CONNECTION_MODE=local
 HF_REALTIME_WS_URL=ws://127.0.0.1:8765/v1/realtime
+HF_REALTIME_WS_PING_INTERVAL_S=60
+HF_REALTIME_WS_PING_TIMEOUT_S=60
 ```
 
 Then launch the app normally:

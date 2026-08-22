@@ -51,6 +51,7 @@ coverage.xml
 tmp/
 *.log
 cache/
+local_qwen3_tts_server/samples/
 
 # macOS
 .DS_Store

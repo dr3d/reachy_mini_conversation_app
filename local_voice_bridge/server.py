@@ -3,6 +3,7 @@
 import os
 import re
 import json
+import time
 import uuid
 import wave
 import base64
@@ -13,14 +14,14 @@ import platform
 import tempfile
 import importlib
 import subprocess
+from io import BytesIO
 from typing import Any, Protocol
 from pathlib import Path
 from dataclasses import field, dataclass
 
 import httpx
-import websockets
 from dotenv import load_dotenv
-from websockets.server import WebSocketServerProtocol
+from websockets.legacy.server import WebSocketServerProtocol, serve
 
 
 SAMPLE_RATE = 16000
@@ -31,9 +32,10 @@ DEFAULT_PORT = 8765
 
 logger = logging.getLogger("local_voice_bridge")
 
-load_dotenv(Path(__file__).with_name(".env"))
+load_dotenv(Path(__file__).with_name(".env"), override=True)
 
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_DLL_DIRECTORY_HANDLES: list[object] = []
 _MARKDOWN_BULLET_RE = re.compile(r"(?m)^\s*[*+-]\s+")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\\)\*{1,3}([^*\n]+?)(?<!\\)\*{1,3}")
 
@@ -106,12 +108,56 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.lower() not in _FALSE_VALUES
 
 
+def _env_int(name: str, default: int) -> int:
+    value = _env(name)
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning("Invalid integer value for %s=%r, using %s", name, value, default)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = _env(name)
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using %s", name, value, default)
+        return default
+
+
 def _event_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
 def _now_item_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+def _elapsed_ms(start_s: float) -> int:
+    return int((time.perf_counter() - start_s) * 1000)
+
+
+def _add_nvidia_dll_directories() -> None:
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+
+    for parent in Path(__file__).resolve().parents:
+        nvidia_dir = parent / ".venv" / "Lib" / "site-packages" / "nvidia"
+        if not nvidia_dir.is_dir():
+            continue
+        path_entries = []
+        for bin_dir in nvidia_dir.glob("*/*bin"):
+            if bin_dir.is_dir():
+                path_entries.append(str(bin_dir))
+                _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(str(bin_dir)))
+        if path_entries:
+            os.environ["PATH"] = f"{os.pathsep.join(path_entries)}{os.pathsep}{os.environ.get('PATH', '')}"
+        return
 
 
 def _b64_pcm(pcm: bytes) -> str:
@@ -137,13 +183,27 @@ def _read_wav_as_16khz_mono_pcm(path: Path) -> bytes:
         sample_rate = wav_file.getframerate()
         pcm = wav_file.readframes(wav_file.getnframes())
 
+    return _normalize_pcm(pcm, channels, sample_width, sample_rate)
+
+
+def _read_wav_bytes_as_16khz_mono_pcm(wav_bytes: bytes) -> bytes:
+    with wave.open(BytesIO(wav_bytes), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        sample_rate = wav_file.getframerate()
+        pcm = wav_file.readframes(wav_file.getnframes())
+
+    return _normalize_pcm(pcm, channels, sample_width, sample_rate)
+
+
+def _normalize_pcm(pcm: bytes, channels: int, sample_width: int, sample_rate: int) -> bytes:
     if sample_width != SAMPLE_WIDTH:
         pcm = audioop.lin2lin(pcm, sample_width, SAMPLE_WIDTH)
     if channels > 1:
         pcm = audioop.tomono(pcm, SAMPLE_WIDTH, 0.5, 0.5)
     if sample_rate != SAMPLE_RATE:
         pcm, _ = audioop.ratecv(pcm, SAMPLE_WIDTH, CHANNELS, sample_rate, SAMPLE_RATE, None)
-    return pcm
+    return bytes(pcm)
 
 
 def _float_samples_to_pcm(samples: Any, sample_rate: int) -> bytes:
@@ -156,7 +216,7 @@ def _float_samples_to_pcm(samples: Any, sample_rate: int) -> bytes:
     pcm = (sample_array * 32767.0).astype(numpy.int16).tobytes()
     if sample_rate != SAMPLE_RATE:
         pcm, _ = audioop.ratecv(pcm, SAMPLE_WIDTH, CHANNELS, sample_rate, SAMPLE_RATE, None)
-    return pcm
+    return bytes(pcm)
 
 
 def _rms(pcm: bytes) -> int:
@@ -169,6 +229,73 @@ def _chunk_pcm(pcm: bytes, chunk_ms: int = 100) -> list[bytes]:
     bytes_per_ms = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS // 1000
     chunk_size = max(bytes_per_ms * chunk_ms, SAMPLE_WIDTH)
     return [pcm[index : index + chunk_size] for index in range(0, len(pcm), chunk_size)]
+
+
+def _split_tts_text(text: str, max_chars: int) -> list[str]:
+    clean_text = re.sub(r"\s+", " ", text).strip()
+    if not clean_text:
+        return []
+
+    sentences = [match.group(0).strip() for match in re.finditer(r"[^.!?]+(?:[.!?]+|$)", clean_text)]
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        if not sentence:
+            continue
+        if len(sentence) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_long_tts_sentence(sentence, max_chars))
+            continue
+        candidate = f"{current} {sentence}".strip()
+        if current and len(candidate) > max_chars:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = candidate
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_long_tts_sentence(sentence: str, max_chars: int) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for word in sentence.split():
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            chunks.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _limit_spoken_text(text: str, max_chars: int) -> str:
+    clean_text = re.sub(r"\s+", " ", text).strip()
+    if max_chars <= 0 or len(clean_text) <= max_chars:
+        return clean_text
+
+    sentences = [match.group(0).strip() for match in re.finditer(r"[^.!?]+(?:[.!?]+|$)", clean_text)]
+    selected: list[str] = []
+    selected_chars = 0
+    for sentence in sentences:
+        candidate_chars = selected_chars + len(sentence) + (1 if selected else 0)
+        if selected and candidate_chars > max_chars:
+            break
+        if not selected and len(sentence) > max_chars:
+            return sentence[: max(0, max_chars - 3)].rstrip() + "..."
+        selected.append(sentence)
+        selected_chars = candidate_chars
+
+    limited_text = " ".join(selected).strip()
+    if limited_text:
+        return limited_text
+    return clean_text[: max(0, max_chars - 3)].rstrip() + "..."
 
 
 def _decode_escaped_text(text: str) -> str:
@@ -260,6 +387,7 @@ class _CommandStt:
         self.command_template = command_template
 
     async def transcribe(self, pcm: bytes) -> str:
+        started_s = time.perf_counter()
         with tempfile.TemporaryDirectory() as tmp_dir:
             wav_path = Path(tmp_dir) / "input.wav"
             _write_wav(wav_path, pcm)
@@ -276,7 +404,72 @@ class _CommandStt:
             except subprocess.CalledProcessError as exc:
                 details = (exc.stderr or exc.stdout or str(exc)).strip()
                 raise RuntimeError(f"STT command failed: {details}") from exc
-        return result.stdout.strip()
+        transcript = result.stdout.strip()
+        logger.info("STT command completed in %d ms, transcript_chars=%d", _elapsed_ms(started_s), len(transcript))
+        return transcript
+
+
+class _FasterWhisperStt:
+    def __init__(self) -> None:
+        self.model_name = _env("LOCAL_BRIDGE_STT_MODEL", "small.en")
+        self.device = _env("LOCAL_BRIDGE_STT_DEVICE", "auto")
+        self.compute_type = _env("LOCAL_BRIDGE_STT_COMPUTE_TYPE", "default")
+        self.language = _env("LOCAL_BRIDGE_STT_LANGUAGE", "en")
+        self.beam_size = int(_env("LOCAL_BRIDGE_STT_BEAM_SIZE", "5"))
+        self.best_of = int(_env("LOCAL_BRIDGE_STT_BEST_OF", "5"))
+        self.hotwords = _env("LOCAL_BRIDGE_STT_HOTWORDS")
+        self.initial_prompt = _env("LOCAL_BRIDGE_STT_INITIAL_PROMPT")
+        self.model: Any | None = None
+        self.lock = asyncio.Lock()
+
+    def _load(self) -> Any:
+        if self.model is not None:
+            return self.model
+
+        _add_nvidia_dll_directories()
+        try:
+            faster_whisper = importlib.import_module("faster_whisper")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("faster-whisper is not installed in the conversation app environment.") from exc
+
+        model_kwargs = {"device": self.device}
+        if self.compute_type != "default":
+            model_kwargs["compute_type"] = self.compute_type
+
+        started_s = time.perf_counter()
+        self.model = faster_whisper.WhisperModel(self.model_name, **model_kwargs)
+        logger.info(
+            "Loaded faster-whisper model %s on %s in %d ms",
+            self.model_name,
+            self.device,
+            _elapsed_ms(started_s),
+        )
+        return self.model
+
+    def _transcribe_sync(self, wav_path: Path) -> str:
+        model = self._load()
+        segments, _ = model.transcribe(
+            str(wav_path),
+            language=self.language.strip() or None,
+            vad_filter=True,
+            beam_size=self.beam_size,
+            best_of=self.best_of,
+            hotwords=self.hotwords.strip() or None,
+            initial_prompt=self.initial_prompt.strip() or None,
+        )
+        return " ".join(segment.text.strip() for segment in segments).strip()
+
+    async def transcribe(self, pcm: bytes) -> str:
+        started_s = time.perf_counter()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wav_path = Path(tmp_dir) / "input.wav"
+            _write_wav(wav_path, pcm)
+            async with self.lock:
+                transcript = await asyncio.to_thread(self._transcribe_sync, wav_path)
+        logger.info(
+            "STT faster-whisper completed in %d ms, transcript_chars=%d", _elapsed_ms(started_s), len(transcript)
+        )
+        return transcript
 
 
 class _MissingStt:
@@ -444,6 +637,52 @@ class _KokoroTts:
         return _float_samples_to_pcm(samples, sample_rate)
 
 
+class _Qwen3HttpTts:
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self.url = _env("LOCAL_BRIDGE_QWEN_TTS_URL", "http://127.0.0.1:8000/v1/audio/speech")
+        self.model = _env("LOCAL_BRIDGE_QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
+        self.voice = _env("LOCAL_BRIDGE_QWEN_TTS_VOICE", "Aiden")
+        self.language = _env("LOCAL_BRIDGE_QWEN_TTS_LANGUAGE", "English")
+        self.instruct = _env("LOCAL_BRIDGE_QWEN_TTS_INSTRUCT")
+        self.timeout_s = float(_env("LOCAL_BRIDGE_QWEN_TTS_TIMEOUT_S", "60"))
+        self.client = client
+
+    async def synthesize(self, text: str) -> bytes:
+        started_s = time.perf_counter()
+        text = _speech_text(text)
+        if not text:
+            return b""
+
+        payload = {
+            "model": self.model,
+            "input": text,
+            "voice": self.voice,
+            "response_format": "wav",
+            "language": self.language,
+        }
+        if self.instruct:
+            payload["instruct"] = self.instruct
+
+        if self.client is not None:
+            response = await self.client.post(self.url, json=payload)
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+                response = await client.post(self.url, json=payload)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            details = exc.response.text.strip()
+            raise RuntimeError(f"Qwen3-TTS HTTP failed: {details}") from exc
+        pcm = _read_wav_bytes_as_16khz_mono_pcm(response.content)
+        logger.info(
+            "TTS qwen3tts completed in %d ms, text_chars=%d, pcm_ms=%d",
+            _elapsed_ms(started_s),
+            len(text),
+            len(pcm) // (SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS // 1000),
+        )
+        return pcm
+
+
 class _MissingTts:
     async def synthesize(self, text: str) -> bytes:
         raise RuntimeError("No TTS provider configured. Set LOCAL_BRIDGE_TTS_COMMAND.")
@@ -465,6 +704,7 @@ class _LmStudioProvider:
         self.model = _env("LOCAL_BRIDGE_LMSTUDIO_MODEL")
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> _LlmResult:
+        started_s = time.perf_counter()
         if not self.model:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(f"{self.base_url}/models")
@@ -476,8 +716,8 @@ class _LmStudioProvider:
 
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
-            "temperature": float(_env("LOCAL_BRIDGE_TEMPERATURE", "0.7")),
+            "messages": _llm_messages_with_local_speech_budget(messages),
+            "temperature": _env_float("LOCAL_BRIDGE_TEMPERATURE", 0.7),
             "stream": False,
         }
         chat_tools = _to_chat_completion_tools(tools)
@@ -494,10 +734,47 @@ class _LmStudioProvider:
             data = response.json()
 
         message = data["choices"][0]["message"]
-        return _LlmResult(
+        result = _LlmResult(
             content=message.get("content") or "",
             tool_calls=message.get("tool_calls") or [],
         )
+        logger.info(
+            "LLM chat completed in %d ms, model=%s, content_chars=%d, tool_calls=%d",
+            _elapsed_ms(started_s),
+            self.model,
+            len(result.content),
+            len(result.tool_calls),
+        )
+        return result
+
+
+def _llm_messages_with_local_speech_budget(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    max_chars = _env_int("LOCAL_BRIDGE_MAX_SPOKEN_CHARS", 220)
+    if max_chars <= 0:
+        return messages
+
+    budget_instruction = (
+        "Local speech synthesis is slow. Keep normal spoken replies under "
+        f"{max_chars} characters, preferably one or two short sentences. "
+        "Only exceed this when the user explicitly asks for a long answer, recitation, or story."
+    )
+    if messages and messages[0].get("role") == "system":
+        system_message = {**messages[0], "content": f"{messages[0].get('content') or ''}\n\n{budget_instruction}"}
+        return [system_message, *messages[1:]]
+    return [{"role": "system", "content": budget_instruction}, *messages]
+
+
+def _message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    text_parts: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and isinstance(part.get("text"), str):
+            text_parts.append(part["text"])
+    return " ".join(text_parts)
 
 
 def _to_chat_completion_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -647,8 +924,8 @@ class _BridgeSession:
         await self._vad_step(pcm)
 
     async def _vad_step(self, pcm: bytes) -> None:
-        speech_threshold = int(_env("LOCAL_BRIDGE_VAD_RMS", "350"))
-        stop_silence_ms = int(_env("LOCAL_BRIDGE_VAD_STOP_MS", "700"))
+        speech_threshold = _env_int("LOCAL_BRIDGE_VAD_RMS", 350)
+        stop_silence_ms = _env_int("LOCAL_BRIDGE_VAD_STOP_MS", 700)
         frame_ms = max(1, int(len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS) * 1000))
         is_speech = _rms(pcm) >= speech_threshold
 
@@ -677,6 +954,7 @@ class _BridgeSession:
                 await self._finish_speech_turn()
 
     async def _finish_speech_turn(self) -> None:
+        turn_started_s = time.perf_counter()
         item_id = self.speech_item_id or _now_item_id("item")
         self.speaking = False
         self.silence_ms = 0
@@ -700,6 +978,7 @@ class _BridgeSession:
         if not transcript:
             return
 
+        logger.info("Speech turn transcription ready in %d ms", _elapsed_ms(turn_started_s))
         self.messages.append({"role": "user", "content": transcript})
         await self.send(
             {
@@ -711,9 +990,11 @@ class _BridgeSession:
             }
         )
         await self.respond()
+        logger.info("Speech turn completed in %d ms", _elapsed_ms(turn_started_s))
 
     async def respond(self) -> None:
         async with self.response_lock:
+            response_started_s = time.perf_counter()
             response_id = _now_item_id("resp")
             item_id = _now_item_id("item")
             await self.send(
@@ -753,9 +1034,20 @@ class _BridgeSession:
                         }
                     )
                 await self._response_done(response_id, "completed")
+                logger.info("Response completed with tool calls in %d ms", _elapsed_ms(response_started_s))
                 return
 
             text, emoji_emotion = _speech_text_and_emoji_emotion(result.content.strip())
+            if not self._last_user_requested_long_spoken_response():
+                max_spoken_chars = _env_int("LOCAL_BRIDGE_MAX_SPOKEN_CHARS", 220)
+                limited_text = _limit_spoken_text(text, max_spoken_chars)
+                if limited_text != text:
+                    logger.info(
+                        "Limited spoken response from %d to %d chars for local TTS",
+                        len(text),
+                        len(limited_text),
+                    )
+                    text = limited_text
             emoji_tool_call = None
             if (
                 emoji_emotion
@@ -765,10 +1057,10 @@ class _BridgeSession:
                 emoji_tool_call = _emotion_tool_call(emoji_emotion)
 
             if text or emoji_tool_call:
-                assistant_message: dict[str, Any] = {"role": "assistant", "content": text or None}
+                assistant_response_message: dict[str, Any] = {"role": "assistant", "content": text or None}
                 if emoji_tool_call:
-                    assistant_message["tool_calls"] = [emoji_tool_call]
-                self.messages.append(assistant_message)
+                    assistant_response_message["tool_calls"] = [emoji_tool_call]
+                self.messages.append(assistant_response_message)
 
             if emoji_tool_call:
                 function = emoji_tool_call["function"]
@@ -797,23 +1089,9 @@ class _BridgeSession:
                         "transcript": text,
                     }
                 )
-                try:
-                    audio_pcm = await self.tts.synthesize(text)
-                except Exception as exc:
-                    await self.error(str(exc), "tts_failed")
-                    audio_pcm = b""
-                for chunk in _chunk_pcm(audio_pcm):
-                    await self.send(
-                        {
-                            "type": "response.output_audio.delta",
-                            "event_id": _event_id("evt"),
-                            "response_id": response_id,
-                            "item_id": item_id,
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": _b64_pcm(chunk),
-                        }
-                    )
+                tts_chunks = _split_tts_text(text, _env_int("LOCAL_BRIDGE_TTS_CHUNK_CHARS", 80))
+                logger.info("Synthesizing response as %d TTS chunk(s), text_chars=%d", len(tts_chunks), len(text))
+                await self._synthesize_and_stream_tts_chunks(tts_chunks, response_id, item_id)
 
             await self.send(
                 {
@@ -826,6 +1104,67 @@ class _BridgeSession:
                 }
             )
             await self._response_done(response_id, "completed")
+            logger.info("Response completed in %d ms, text_chars=%d", _elapsed_ms(response_started_s), len(text))
+
+    async def _synthesize_and_stream_tts_chunks(
+        self,
+        tts_chunks: list[str],
+        response_id: str,
+        item_id: str,
+    ) -> None:
+        next_audio_task: asyncio.Task[bytes] | None = None
+        total_chunks = len(tts_chunks)
+        for chunk_index, tts_text in enumerate(tts_chunks):
+            try:
+                if next_audio_task is None:
+                    audio_pcm = await self.tts.synthesize(tts_text)
+                else:
+                    audio_pcm = await next_audio_task
+
+                if chunk_index + 1 < total_chunks:
+                    next_audio_task = asyncio.create_task(self.tts.synthesize(tts_chunks[chunk_index + 1]))
+                else:
+                    next_audio_task = None
+            except Exception as exc:
+                await self.error(str(exc), "tts_failed")
+                return
+
+            logger.info(
+                "Streaming TTS chunk %d/%d, text_chars=%d, pcm_ms=%d",
+                chunk_index + 1,
+                total_chunks,
+                len(tts_text),
+                len(audio_pcm) // (SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS // 1000),
+            )
+            await self._stream_audio_pcm(audio_pcm, response_id, item_id)
+
+    async def _stream_audio_pcm(self, audio_pcm: bytes, response_id: str, item_id: str) -> None:
+        pace = max(0.0, _env_float("LOCAL_BRIDGE_AUDIO_DELTA_PACE", 0.85))
+        bytes_per_second = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS
+        for chunk in _chunk_pcm(audio_pcm):
+            await self.send(
+                {
+                    "type": "response.output_audio.delta",
+                    "event_id": _event_id("evt"),
+                    "response_id": response_id,
+                    "item_id": item_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": _b64_pcm(chunk),
+                }
+            )
+            if pace > 0.0:
+                await asyncio.sleep((len(chunk) / bytes_per_second) * pace)
+
+    def _last_user_requested_long_spoken_response(self) -> bool:
+        for message in reversed(self.messages):
+            if message.get("role") != "user":
+                continue
+            text = _message_text(message.get("content")).lower()
+            return bool(
+                re.search(r"\b(recite|read|long|full|entire|whole|complete|detailed|story|poem|essay)\b", text)
+            )
+        return False
 
     async def _response_done(self, response_id: str, status: str) -> None:
         await self.send(
@@ -845,6 +1184,12 @@ def _build_llm_provider() -> _LlmProvider:
 
 
 def _build_stt_provider() -> _SttProvider:
+    provider = _env("LOCAL_BRIDGE_STT_PROVIDER", "").lower()
+    if provider == "faster_whisper":
+        return _FasterWhisperStt()
+    if provider:
+        raise RuntimeError("LOCAL_BRIDGE_STT_PROVIDER must be faster_whisper.")
+
     command = _env("LOCAL_BRIDGE_STT_COMMAND")
     if command:
         return _CommandStt(command)
@@ -857,8 +1202,10 @@ def _build_tts_provider() -> _TtsProvider:
         return _PiperTts()
     if provider == "kokoro":
         return _KokoroTts()
+    if provider == "qwen3tts":
+        return _Qwen3HttpTts()
     if provider and provider != "sapi":
-        raise RuntimeError("LOCAL_BRIDGE_TTS_PROVIDER must be piper, kokoro, or sapi.")
+        raise RuntimeError("LOCAL_BRIDGE_TTS_PROVIDER must be piper, kokoro, qwen3tts, or sapi.")
 
     command = _env("LOCAL_BRIDGE_TTS_COMMAND")
     if command:
@@ -916,9 +1263,11 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
     )
     host = _env("LOCAL_BRIDGE_HOST", DEFAULT_HOST)
-    port = int(_env("LOCAL_BRIDGE_PORT", str(DEFAULT_PORT)))
+    port = _env_int("LOCAL_BRIDGE_PORT", DEFAULT_PORT)
+    ping_interval = _env_float("LOCAL_BRIDGE_WS_PING_INTERVAL_S", 60.0)
+    ping_timeout = _env_float("LOCAL_BRIDGE_WS_PING_TIMEOUT_S", 60.0)
     logger.info("Starting local voice bridge on ws://%s:%s/v1/realtime", host, port)
-    async with websockets.serve(_handle_connection, host, port):
+    async with serve(_handle_connection, host, port, ping_interval=ping_interval, ping_timeout=ping_timeout):
         await asyncio.Future()
 
 

@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import uuid
@@ -70,6 +71,8 @@ logger = logging.getLogger(__name__)
 
 _RESPONSE_DONE_TIMEOUT: Final[float] = 30.0
 _RESPONSE_REJECTION_RETRY_DELAY: Final[float] = 0.5
+_LOCAL_WS_PING_INTERVAL_S: Final[float] = 60.0
+_LOCAL_WS_PING_TIMEOUT_S: Final[float] = 60.0
 _MANUAL_EYE_CUE_HOLDOFF_S: Final[float] = 12.0
 _TOOL_EYE_CUE_HOLDOFF_S: Final[dict[str, float]] = {
     "dance": 8.0,
@@ -78,6 +81,19 @@ _TOOL_EYE_CUE_HOLDOFF_S: Final[dict[str, float]] = {
 }
 _TRANSCRIPT_EYE_EXPRESSION_DURATION_S: Final[float] = 6.0
 _TRANSCRIPT_EYE_GAZE_DURATION_S: Final[float] = 5.0
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid float value for %s=%r, using %s", name, raw, default)
+        return default
+
+
 _TRANSCRIPT_EYE_GAZE_MOVE_MS: Final[int] = 250
 _TRANSCRIPT_EYE_STYLE_ALIASES: Final[dict[str, str]] = {
     "friendly": "friendly",
@@ -942,6 +958,11 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
         connect_kwargs: dict[str, Any] = {}
         if self._realtime_connect_query:
             connect_kwargs["extra_query"] = self._realtime_connect_query
+        if get_hf_connection_selection().mode == HF_LOCAL_CONNECTION_MODE:
+            connect_kwargs["websocket_connection_options"] = {
+                "ping_interval": _env_float("HF_REALTIME_WS_PING_INTERVAL_S", _LOCAL_WS_PING_INTERVAL_S),
+                "ping_timeout": _env_float("HF_REALTIME_WS_PING_TIMEOUT_S", _LOCAL_WS_PING_TIMEOUT_S),
+            }
         async with self.client.realtime.connect(**connect_kwargs) as conn:
             try:
                 session_config = self._get_session_config(tool_specs)

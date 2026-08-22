@@ -582,6 +582,7 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
     monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
     monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "deployed")
 
     captured_connect: dict[str, Any] = {}
     handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
@@ -592,6 +593,25 @@ async def test_run_realtime_session_passes_allocated_session_query(monkeypatch: 
 
     assert "model" not in captured_connect
     assert captured_connect["extra_query"] == {"session_token": "abc123"}
+
+
+@pytest.mark.asyncio
+async def test_run_realtime_session_uses_longer_local_websocket_heartbeat(monkeypatch: Any) -> None:
+    """Local realtime bridge sessions should tolerate slow local TTS responses."""
+    monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")
+    monkeypatch.setattr(hf_mod, "get_session_voice", lambda default=HF_DEFAULT_VOICE: default)
+    monkeypatch.setattr(hf_mod, "get_tool_specs", lambda: [])
+    monkeypatch.setattr(config, "HF_REALTIME_CONNECTION_MODE", "local")
+    monkeypatch.setenv("HF_REALTIME_WS_PING_INTERVAL_S", "61")
+    monkeypatch.setenv("HF_REALTIME_WS_PING_TIMEOUT_S", "62")
+
+    captured_connect: dict[str, Any] = {}
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.client = _make_fake_realtime_client(captured_connect=captured_connect)
+
+    await handler._run_realtime_session()
+
+    assert captured_connect["websocket_connection_options"] == {"ping_interval": 61.0, "ping_timeout": 62.0}
 
 
 @pytest.mark.parametrize(("hf_token", "expected_api_key"), [(None, "DUMMY"), ("hf-secret", "hf-secret")])
