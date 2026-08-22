@@ -11,6 +11,7 @@ import audioop
 import logging
 import platform
 import tempfile
+import importlib
 import subprocess
 from typing import Any, Protocol
 from pathlib import Path
@@ -33,6 +34,8 @@ logger = logging.getLogger("local_voice_bridge")
 load_dotenv(Path(__file__).with_name(".env"))
 
 _FALSE_VALUES = {"0", "false", "no", "off"}
+_MARKDOWN_BULLET_RE = re.compile(r"(?m)^\s*[*+-]\s+")
+_MARKDOWN_EMPHASIS_RE = re.compile(r"(?<!\\)\*{1,3}([^*\n]+?)(?<!\\)\*{1,3}")
 
 _EMOJI_EMOTION_BY_CODEPOINT: dict[int, str] = {
     0x2600: "happy",
@@ -143,6 +146,19 @@ def _read_wav_as_16khz_mono_pcm(path: Path) -> bytes:
     return pcm
 
 
+def _float_samples_to_pcm(samples: Any, sample_rate: int) -> bytes:
+    numpy = importlib.import_module("numpy")
+    sample_array = numpy.asarray(samples, dtype=numpy.float32)
+    if sample_array.ndim > 1:
+        sample_array = sample_array.reshape(-1)
+
+    sample_array = numpy.clip(sample_array, -1.0, 1.0)
+    pcm = (sample_array * 32767.0).astype(numpy.int16).tobytes()
+    if sample_rate != SAMPLE_RATE:
+        pcm, _ = audioop.ratecv(pcm, SAMPLE_WIDTH, CHANNELS, sample_rate, SAMPLE_RATE, None)
+    return pcm
+
+
 def _rms(pcm: bytes) -> int:
     if not pcm:
         return 0
@@ -189,6 +205,15 @@ def _is_emoji_component(codepoint: int) -> bool:
     )
 
 
+def _strip_tts_markdown(text: str) -> str:
+    stripped = text
+    stripped = _MARKDOWN_BULLET_RE.sub("", stripped)
+    stripped = _MARKDOWN_EMPHASIS_RE.sub(r"\1", stripped)
+    stripped = stripped.replace("\\*", "*")
+    stripped = stripped.replace("`", "")
+    return stripped
+
+
 def _speech_text_and_emoji_emotion(text: str) -> tuple[str, str | None]:
     decoded = _decode_escaped_text(text)
     emotion: str | None = None
@@ -201,7 +226,7 @@ def _speech_text_and_emoji_emotion(text: str) -> tuple[str, str | None]:
             continue
         speech_chars.append(char)
 
-    decoded = "".join(speech_chars)
+    decoded = _strip_tts_markdown("".join(speech_chars))
     decoded = re.sub(r"(\d+(?:\.\d+)?)\s*(?:\u00b0|℃)\s*[Cc]\b", r"\1 degrees Celsius", decoded)
     decoded = re.sub(r"(\d+(?:\.\d+)?)\s*(?:\u00b0|℉)\s*[Ff]\b", r"\1 degrees Fahrenheit", decoded)
     decoded = decoded.replace("\u00b0", " degrees ")
@@ -377,6 +402,46 @@ class _PiperTts:
                 details = (exc.stderr or exc.stdout or str(exc)).strip()
                 raise RuntimeError(f"Piper TTS failed: {details}") from exc
             return _read_wav_as_16khz_mono_pcm(wav_path)
+
+
+class _KokoroTts:
+    def __init__(self) -> None:
+        bridge_dir = Path(__file__).parent
+        self.model_path = Path(_env("LOCAL_BRIDGE_KOKORO_MODEL", str(bridge_dir / "kokoro" / "kokoro-v1.0.onnx")))
+        self.voices_path = Path(_env("LOCAL_BRIDGE_KOKORO_VOICES", str(bridge_dir / "kokoro" / "voices-v1.0.bin")))
+        self.voice = _env("LOCAL_BRIDGE_KOKORO_VOICE", "am_eric")
+        self.speed = float(_env("LOCAL_BRIDGE_KOKORO_SPEED", "1.0"))
+        self.lang = _env("LOCAL_BRIDGE_KOKORO_LANG", "en-us")
+        self.kokoro: Any | None = None
+
+    def _load(self) -> Any:
+        if self.kokoro is not None:
+            return self.kokoro
+        if not self.model_path.exists():
+            raise RuntimeError(f"Kokoro model not found: {self.model_path}")
+        if not self.voices_path.exists():
+            raise RuntimeError(f"Kokoro voices file not found: {self.voices_path}")
+        try:
+            kokoro_module = importlib.import_module("kokoro_onnx")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "kokoro-onnx is not installed. Run: pip install -r requirements-tts-kokoro.txt"
+            ) from exc
+
+        self.kokoro = kokoro_module.Kokoro(str(self.model_path), str(self.voices_path))
+        return self.kokoro
+
+    def _create_audio(self, text: str) -> tuple[Any, int]:
+        kokoro = self._load()
+        samples, sample_rate = kokoro.create(text, voice=self.voice, speed=self.speed, lang=self.lang)
+        return samples, int(sample_rate)
+
+    async def synthesize(self, text: str) -> bytes:
+        text = _speech_text(text)
+        if not text:
+            return b""
+        samples, sample_rate = await asyncio.to_thread(self._create_audio, text)
+        return _float_samples_to_pcm(samples, sample_rate)
 
 
 class _MissingTts:
@@ -790,8 +855,10 @@ def _build_tts_provider() -> _TtsProvider:
     provider = _env("LOCAL_BRIDGE_TTS_PROVIDER", "").lower()
     if provider == "piper":
         return _PiperTts()
+    if provider == "kokoro":
+        return _KokoroTts()
     if provider and provider != "sapi":
-        raise RuntimeError("LOCAL_BRIDGE_TTS_PROVIDER must be piper or sapi.")
+        raise RuntimeError("LOCAL_BRIDGE_TTS_PROVIDER must be piper, kokoro, or sapi.")
 
     command = _env("LOCAL_BRIDGE_TTS_COMMAND")
     if command:

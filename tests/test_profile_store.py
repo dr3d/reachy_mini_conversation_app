@@ -64,9 +64,10 @@ def test_profile_listing_requires_profile_document(tmp_path: Path) -> None:
     assert list_profile_names(tmp_path) == ["visible"]
 
 
-def test_bundled_profiles_enable_head_tracking_by_default() -> None:
-    """Every bundled personality should start with head tracking available."""
+def test_bundled_profiles_enable_robot_surface_tools_by_default() -> None:
+    """Every bundled personality should start with common robot surface tools available."""
+    expected_tools = {"cast_media", "show_image", "set_eyes", "set_chassis", "head_tracking"}
     for profile_name in list_profile_names(DEFAULT_PROFILES_DIRECTORY):
         profile = read_profile_from_directory(profile_name, DEFAULT_PROFILES_DIRECTORY / profile_name)
 
-        assert "head_tracking" in profile.default_tools, profile_name
+        assert expected_tools <= set(profile.default_tools), profile_name

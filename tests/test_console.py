@@ -883,6 +883,63 @@ def test_rpc_transcript_notification_broadcast() -> None:
     assert msg["params"] == {"role": "assistant", "text": "hello there", "final": True}
 
 
+def test_rpc_log_notification_broadcast() -> None:
+    """Handler text output is available to the browser round log."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        stream._dispatch_log_message("assistant", "tool result ready")
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.log"
+    assert msg["params"] == {"role": "assistant", "content": "tool result ready"}
+
+
+def test_rpc_camera_image_notification_broadcast() -> None:
+    """Camera metadata is available to the browser last-image preview."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        stream._dispatch_camera_image(
+            {
+                "image_b64": "abc123",
+                "mime_type": "image/jpeg",
+                "jpeg_bytes": 4,
+            }
+        )
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.camera_image"
+    assert msg["params"] == {
+        "image_b64": "abc123",
+        "mime_type": "image/jpeg",
+        "jpeg_bytes": 4,
+    }
+
+
+def test_rpc_display_image_url_notification_broadcast() -> None:
+    """Found image URLs are available to the browser image preview."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        stream._dispatch_camera_image(
+            {
+                "image_url": "https://example.com/reachy.jpg",
+                "source": "web",
+                "title": "Reachy",
+            }
+        )
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.camera_image"
+    assert msg["params"] == {
+        "image_url": "https://example.com/reachy.jpg",
+        "mime_type": "image/jpeg",
+        "source": "web",
+        "title": "Reachy",
+    }
+
+
 def test_rpc_settings_methods() -> None:
     """Personality, voice, and tool settings are reachable over /rpc."""
     app = FastAPI()

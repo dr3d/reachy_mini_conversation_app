@@ -786,6 +786,132 @@ button {
   min-height: 1.4em;
 }
 
+.talk-camera {
+  width: min(100%, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.talk-camera[hidden] {
+  display: none;
+}
+
+.talk-camera__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.talk-camera__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.talk-camera__status {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.talk-camera__image {
+  display: block;
+  width: 100%;
+  max-height: min(28vh, 260px);
+  object-fit: contain;
+  background: #050608;
+  aspect-ratio: 16 / 9;
+}
+
+.talk-log {
+  width: min(100%, 720px);
+  max-height: min(34vh, 320px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+}
+
+.talk-log__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.talk-log__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.talk-log__status {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.talk-log__items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 88px;
+  margin: 0;
+  padding: 10px 14px 12px;
+  overflow: auto;
+  list-style: none;
+}
+
+.talk-log__item {
+  padding: 0 0 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.talk-log__item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.talk-log__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.talk-log__label {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.talk-log__time {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.talk-log__text {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 /* 6. Settings and tools views */
 
 .view--settings,

@@ -166,6 +166,41 @@ class LocalStream:
                 {"role": role, "text": text, "final": final},
             )
 
+    def _dispatch_log_message(self, role: object, content: str) -> None:
+        """Push a conversation.log notification to JSON-RPC clients."""
+        if self._rpc is not None:
+            self._rpc.broadcast_threadsafe(
+                "conversation.log",
+                {
+                    "role": str(role or "system"),
+                    "content": content if len(content) <= 2000 else content[:2000] + "...",
+                },
+            )
+
+    def _dispatch_camera_image(self, msg: dict[str, object]) -> None:
+        """Push a conversation.camera_image notification to JSON-RPC clients."""
+        image_b64 = msg.get("image_b64")
+        image_url = msg.get("image_url")
+        has_b64 = isinstance(image_b64, str) and bool(image_b64)
+        has_url = isinstance(image_url, str) and bool(image_url)
+        if self._rpc is None or not (has_b64 or has_url):
+            return
+
+        payload: dict[str, object] = {"mime_type": str(msg.get("mime_type") or "image/jpeg")}
+        if has_b64:
+            payload["image_b64"] = image_b64
+        if has_url:
+            payload["image_url"] = image_url
+        for key in ("title", "source"):
+            value = msg.get(key)
+            if isinstance(value, str) and value:
+                payload[key] = value
+        for key in ("image_width", "image_height", "jpeg_bytes"):
+            value = msg.get(key)
+            if isinstance(value, int):
+                payload[key] = value
+        self._rpc.broadcast_threadsafe("conversation.camera_image", payload)
+
     # Audio level meter for the client orb. RMS is scaled into a visible 0..1
     # range and capped to ~15 Hz so it stays light on the DataChannel.
     _LEVEL_INTERVAL_S = 1.0 / 15.0
@@ -912,8 +947,11 @@ class LocalStream:
 
             if isinstance(handler_output, AdditionalOutputs):
                 for msg in handler_output.args:
+                    if isinstance(msg, dict):
+                        self._dispatch_camera_image(msg)
                     content = msg.get("content", "")
                     if isinstance(content, str):
+                        self._dispatch_log_message(msg.get("role"), content)
                         logger.info(
                             "role=%s content=%s",
                             msg.get("role"),

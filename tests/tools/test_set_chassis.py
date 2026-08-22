@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -47,6 +48,14 @@ def test_set_chassis_turn_schema_matches_firmware_mixing() -> None:
     description = SetChassis.parameters_schema["properties"]["turn"]["description"]
 
     assert "-1.0 left to 1.0 right" in description
+
+
+def test_set_chassis_description_forbids_drive_queues() -> None:
+    """The model-facing contract should prevent delayed sequence execution."""
+    duration_description = SetChassis.parameters_schema["properties"]["duration_s"]["description"]
+
+    assert "Never queue" in SetChassis.description
+    assert "one tool call per segment" in duration_description
 
 
 @pytest.mark.asyncio
@@ -108,6 +117,29 @@ async def test_set_chassis_sends_firmware_timed_twist_then_stops() -> None:
     assert result["commands_sent"] == 1
     assert chassis_controller.calls[-1] == ("stop", None)
     assert chassis_controller.calls[0] == ("twist", (0.2, -0.1, 0.14))
+
+
+@pytest.mark.asyncio
+async def test_set_chassis_refuses_overlapping_drive_commands() -> None:
+    """Timed chassis movement should not create a hidden queue."""
+    chassis_controller = _FakeChassisController()
+    deps = ToolDependencies(
+        reachy_mini=MagicMock(),
+        movement_manager=MagicMock(),
+        chassis_controller=chassis_controller,
+    )
+    tool = SetChassis()
+
+    first = asyncio.create_task(tool(deps, action="twist", velocity=0.2, turn=0.0, duration_s=0.05))
+    while not chassis_controller.calls:
+        await asyncio.sleep(0)
+    second = await tool(deps, action="twist", velocity=0.2, turn=0.0, duration_s=0.05)
+    first_result = await first
+
+    assert first_result["status"] == "ok"
+    assert second["queued"] is False
+    assert "refusing to queue" in second["error"]
+    assert [call[0] for call in chassis_controller.calls] == ["twist", "stop"]
 
 
 @pytest.mark.asyncio

@@ -332,6 +332,27 @@ pio run -e timer-cam-ota -t upload
 websocket backed by LM Studio plus explicit STT/TTS adapters. It is useful for local voice experiments, but it is
 not required for the default Hugging Face realtime backend. See `local_voice_bridge/README.md` for setup details.
 
+## Cast media tool
+
+The `cast_media` tool lets Reachy search YouTube, play a result, and show direct image URLs on a
+Chromecast-compatible receiver. Configure the default target in `.env`:
+
+```env
+REACHY_MINI_CAST_DEVICE_NAME=Living Room TV
+REACHY_MINI_CAST_TIMEOUT_S=10
+```
+
+If discovery does not find the target, set one or more receiver IPs:
+
+```env
+REACHY_MINI_CAST_KNOWN_HOSTS=192.168.0.45
+```
+
+The tool can list devices, search YouTube, play a YouTube video ID/URL, play the first result for a query, show a
+direct `jpg`/`jpeg`/`png`/`webp`/`gif` image URL, and stop playback. Generic web pages or image-search result pages
+will not cast through this path; the TV needs an image URL it can fetch directly. Fire TV devices need to expose a
+Chromecast-compatible receiver to be controllable by this path.
+
 ## ESP32 eyes HTTP API
 
 The ESP32 eyes API is intentionally high-level. The app sends semantic cues over HTTP; the firmware owns
@@ -486,7 +507,8 @@ Other control fields:
 ## LLM tools exposed to the assistant
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.
-Every bundled profile enables `head_tracking` by default; users can still disable it per personality.
+Every bundled profile enables `head_tracking`, `set_eyes`, `set_chassis`, `cast_media`, and `show_image` by default;
+users can still disable them per personality.
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|
@@ -497,6 +519,8 @@ Every bundled profile enables `head_tracking` by default; users can still disabl
 | `camera` | Capture the latest camera frame and analyze it with the selected realtime backend. | Core install only. Requires the camera (disable with `--no-camera`). |
 | `idle_do_nothing` | Explicitly remain idle during an idle turn. Not intended for normal conversation turns. | Core install only. |
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
+| `cast_media` | Search YouTube, play YouTube videos, show direct image URLs on a Cast receiver, and stop playback. | Requires `pychromecast`/`yt-dlp` and a Chromecast-compatible receiver. Configure with `REACHY_MINI_CAST_DEVICE_NAME`. |
+| `show_image` | Display a direct HTTP/HTTPS image URL in the Talk page image preview. | Core install only. Best paired with a search tool that can provide a direct image URL. |
 | `set_eyes` | Control optional ESP32/RP5 face displays through their HTTP API. | Requires `REACHY_MINI_EYES_BASE_URL`. |
 | `set_chassis` | Control optional ESP32 tracked chassis through its HTTP API. | Requires `REACHY_MINI_CHASSIS_BASE_URL`. |
 | `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |

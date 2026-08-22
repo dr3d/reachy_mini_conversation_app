@@ -863,6 +863,18 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                 image_height = tool_result.get("image_height")
                 jpeg_bytes_value = tool_result.get("jpeg_bytes")
                 jpeg_bytes = jpeg_bytes_value if isinstance(jpeg_bytes_value, int) else (len(b64_im) * 3) // 4
+                camera_output: dict[str, object] = {
+                    "role": "camera",
+                    "content": "Captured camera image.",
+                    "image_b64": b64_im,
+                    "mime_type": "image/jpeg",
+                    "jpeg_bytes": jpeg_bytes,
+                }
+                if isinstance(image_width, int):
+                    camera_output["image_width"] = image_width
+                if isinstance(image_height, int):
+                    camera_output["image_height"] = image_height
+                await self.output_queue.put(AdditionalOutputs(camera_output))
                 await self.connection.conversation.item.create(
                     item={
                         "type": "message",
@@ -887,6 +899,20 @@ class HuggingFaceRealtimeHandler(ConversationHandler):
                         "Added camera image to conversation jpeg_bytes=%s",
                         jpeg_bytes,
                     )
+
+            if completed_tool.tool_name == "show_image" and isinstance(tool_result, dict):
+                image_url = tool_result.get("image_url")
+                if isinstance(image_url, str) and image_url:
+                    image_output: dict[str, object] = {
+                        "role": "image",
+                        "content": "Displayed image.",
+                        "image_url": image_url,
+                        "source": str(tool_result.get("source") or "web"),
+                    }
+                    title = tool_result.get("title")
+                    if isinstance(title, str) and title:
+                        image_output["title"] = title
+                    await self.output_queue.put(AdditionalOutputs(image_output))
 
             if isinstance(completed_tool.id, str):
                 self._in_flight_tool_calls.discard(completed_tool.id)

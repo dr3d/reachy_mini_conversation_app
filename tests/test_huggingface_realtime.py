@@ -217,6 +217,71 @@ async def test_parallel_tool_calls_trigger_single_response(monkeypatch: Any) -> 
 
 
 @pytest.mark.asyncio
+async def test_camera_tool_result_emits_browser_image_metadata(monkeypatch: Any) -> None:
+    """Camera captures should be available to the web UI without exposing base64 to the model result."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler.output_queue = asyncio.Queue()
+    handler._in_flight_tool_calls = {"call_camera"}
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    monkeypatch.setattr(handler, "_safe_response_create", AsyncMock())
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_camera",
+            tool_name="camera",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"b64_im": "abc123"},
+        )
+    )
+
+    model_output = await handler.output_queue.get()
+    camera_output = await handler.output_queue.get()
+
+    assert "abc123" not in model_output.args[0]["content"]
+    assert camera_output.args[0] == {
+        "role": "camera",
+        "content": "Captured camera image.",
+        "image_b64": "abc123",
+        "mime_type": "image/jpeg",
+        "jpeg_bytes": 4,
+    }
+
+
+@pytest.mark.asyncio
+async def test_show_image_tool_result_emits_browser_image_metadata(monkeypatch: Any) -> None:
+    """Displayed web images should reach the UI image preview."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler.output_queue = asyncio.Queue()
+    handler._in_flight_tool_calls = {"call_image"}
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    monkeypatch.setattr(handler, "_safe_response_create", AsyncMock())
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_image",
+            tool_name="show_image",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"status": "ok", "image_url": "https://example.com/reachy.jpg", "source": "web", "title": "Reachy"},
+        )
+    )
+
+    await handler.output_queue.get()
+    image_output = await handler.output_queue.get()
+
+    assert image_output.args[0] == {
+        "role": "image",
+        "content": "Displayed image.",
+        "image_url": "https://example.com/reachy.jpg",
+        "source": "web",
+        "title": "Reachy",
+    }
+
+
+@pytest.mark.asyncio
 async def test_speech_started_during_assistant_playback_does_not_flush(monkeypatch: Any) -> None:
     """Echo-triggered VAD should not clear queued assistant audio."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")

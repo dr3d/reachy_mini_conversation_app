@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 CHASSIS_ACTIONS: tuple[str, ...] = ("status", "stop", "estop", "clear", "tank", "twist")
 MAX_DURATION_S = 5.0
+CHASSIS_BUSY_ERROR = (
+    "Chassis drive command already in progress; refusing to queue another movement. "
+    "Wait for the chassis to stop, then issue one next segment."
+)
+_CHASSIS_DRIVE_LOCK = asyncio.Lock()
 
 
 def _clamp_float(value: object, low: float, high: float) -> float:
@@ -23,7 +28,12 @@ class SetChassis(Tool):
     """Control the optional ESP32 tracked chassis."""
 
     name = "set_chassis"
-    description = "Control the optional ESP32 tracked chassis with stop, e-stop, tank drive, twist drive, or status."
+    description = (
+        "Control the optional ESP32 tracked chassis with exactly one immediate command: status, stop, e-stop, "
+        "tank drive, or twist drive. Never queue, chain, or choreograph multi-step drive sequences. For a multi-step "
+        "request, run only the first safe timed segment now, wait for the result, then ask the user to confirm the "
+        "next segment. Stop/e-stop may always be used immediately."
+    )
     needs_response = True
     parameters_schema = {
         "type": "object",
@@ -61,7 +71,10 @@ class SetChassis(Tool):
                 "type": "number",
                 "minimum": 0.0,
                 "maximum": MAX_DURATION_S,
-                "description": "Optional movement duration for a firmware-timed command, capped at 5 seconds. Omit or use 0 for one command.",
+                "description": (
+                    "Optional movement duration for one firmware-timed segment, capped at 5 seconds. "
+                    "This is not a queue; use one tool call per segment."
+                ),
             },
         },
         "required": ["action"],
@@ -113,6 +126,21 @@ class SetChassis(Tool):
         call_once: Callable[[float | None], dict[str, object]],
         kwargs: dict[str, Any],
     ) -> dict[str, Any]:
+        if _CHASSIS_DRIVE_LOCK.locked():
+            return {"error": CHASSIS_BUSY_ERROR, "queued": False}
+
+        await _CHASSIS_DRIVE_LOCK.acquire()
+        try:
+            return await self._run_exclusive_drive(stop, call_once, kwargs)
+        finally:
+            _CHASSIS_DRIVE_LOCK.release()
+
+    async def _run_exclusive_drive(
+        self,
+        stop: Callable[[], dict[str, object]],
+        call_once: Callable[[float | None], dict[str, object]],
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
         duration_s = _clamp_float(kwargs.get("duration_s", 0.0), 0.0, MAX_DURATION_S)
         if duration_s <= 0.0:
             return await asyncio.to_thread(call_once, None)
@@ -127,6 +155,8 @@ class SetChassis(Tool):
             "status": "ok",
             "duration_s": duration_s,
             "commands_sent": 1,
+            "queued": False,
+            "next_step": "No chassis queue is maintained; wait for an explicit user request before the next segment.",
             "drive": drive_result,
             "stop": stop_result,
         }
