@@ -23,10 +23,8 @@ const CAPTION_BY_STATE = Object.freeze({
 
 const MAX_LOG_ITEMS = 80;
 const ACTIVITY_LOG_LABELS = Object.freeze({
-  response_created: "Thinking",
   tool_call_received: "Tool call",
   tool_result_ready: "Tool result",
-  assistant_transcript_done: "Spoken",
 });
 
 export async function mountTalkView({ outlet, signal }) {

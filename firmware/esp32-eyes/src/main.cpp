@@ -241,12 +241,12 @@ else if(b.id==="gazeCenter")await post("/gaze",{x:0,y:0,duration:number("gdur"),
 else if(b.id==="gazeAuto")await post("/gaze","auto");
 else if(b.id==="idleOn")await post("/control",{idle:true});
 else if(b.id==="idleOff")await post("/control",{idle:false});
-else if(b.id==="blink")await post("/blink",{duration_ms:420});
-else if(b.id==="doubleBlink")await post("/blink",{double:true,duration_ms:260});
-else if(b.id==="winkL")await post("/wink",{eye:"left",duration_ms:650});
-else if(b.id==="winkR")await post("/wink",{eye:"right",duration_ms:650});
-else if(b.id==="sleep")await post("/sleep",{duration:0});
-else if(b.id==="release")await post("/release",{});
+else if(b.id==="blink")await post("/control",{blink:true,duration_ms:420});
+else if(b.id==="doubleBlink")await post("/control",{blink:true,double:true,duration_ms:260});
+else if(b.id==="winkL")await post("/control",{wink:true,eye:"left",duration_ms:650});
+else if(b.id==="winkR")await post("/control",{wink:true,eye:"right",duration_ms:650});
+else if(b.id==="sleep")await post("/control",{sleep:true,duration:0});
+else if(b.id==="release")await post("/control",{release:true});
 else if(b.id==="flip")await post("/control",{flip:"toggle"});
 else if(b.id==="wifiSave")await post("/wifi",{ssid:$("ssid").value,password:$("wifiPass").value});
 else if(b.id==="wifiClear")await post("/wifi",{clear:true});
@@ -2339,11 +2339,17 @@ void printApiStatus(uint32_t now) {
 void releaseApiOverrides(uint32_t now) {
   apiState.idleEnabled = true;
   apiState.moodOverride = false;
+  apiState.moodUntil = 0;
   apiState.gazeOverride = false;
+  apiState.gazeUntil = 0;
   mouthState.overrideShape = false;
   mouthState.talking = false;
+  moodState.from = Mood::Calm;
+  moodState.to = Mood::Calm;
+  moodState.started = now;
+  moodState.duration = 1;
+  moodState.next = now + 1600;
   scheduleNextIdleBeat(now, true);
-  moodState.next = now;
   gazeState.next = now;
 }
 
@@ -2670,6 +2676,7 @@ void sendCors() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.sendHeader("Cache-Control", "no-store, max-age=0");
 }
 
 void sendJson(JsonDocument &doc, int status = 200) {
@@ -2708,6 +2715,16 @@ uint32_t jsonMs(JsonVariantConst value, uint32_t defaultMs) {
     const float number = value.as<float>();
     if (number <= 0.0f) return 0;
     if (number <= 120.0f) return uint32_t(number * 1000.0f);
+    return uint32_t(number);
+  }
+  return defaultMs;
+}
+
+uint32_t jsonMilliseconds(JsonVariantConst value, uint32_t defaultMs) {
+  if (value.isNull()) return defaultMs;
+  if (value.is<float>()) {
+    const float number = value.as<float>();
+    if (number <= 0.0f) return 0;
     return uint32_t(number);
   }
   return defaultMs;
@@ -3070,7 +3087,10 @@ bool handleHttpMouth(JsonVariantConst value, JsonVariantConst durationValue, uin
     }
   }
   if (mouthState.overrideShape || mouthState.talking) {
-    const uint32_t holdMs = jsonMs(mouth["duration_ms"], jsonMs(mouth["duration"], jsonMs(durationValue, API_DEFAULT_MOUTH_MS)));
+    const uint32_t holdMs = jsonMilliseconds(
+      mouth["duration_ms"],
+      jsonMs(mouth["duration"], jsonMs(durationValue, API_DEFAULT_MOUTH_MS))
+    );
     mouthState.overrideUntil = holdMs == 0 ? 0 : now + holdMs;
   }
   return true;
@@ -3094,14 +3114,18 @@ void handleHttpGaze(JsonVariantConst gazeValue, JsonVariantConst durationValue, 
   const float x = hasZ ? rawX : clampf(rawX, -1.0f, 1.0f) * API_NORMALIZED_GAZE_X_MM * API_NORMALIZED_GAZE_X_SIGN;
   const float y = hasZ ? rawY : clampf(rawY, -1.0f, 1.0f) * API_NORMALIZED_GAZE_Y_MM * API_NORMALIZED_GAZE_Y_SIGN;
   const float z = hasZ ? float(gaze["z"]) : API_NORMALIZED_GAZE_Z_MM;
-  const uint32_t holdMs = jsonMs(gaze["hold_ms"], jsonMs(gaze["duration"], jsonMs(durationValue, API_DEFAULT_GAZE_HOLD_MS)));
-  const uint32_t moveMs = jsonMs(gaze["move_ms"], API_DEFAULT_GAZE_MOVE_MS);
+  const uint32_t holdMs = jsonMilliseconds(
+    gaze["hold_ms"],
+    jsonMs(gaze["duration"], jsonMs(durationValue, API_DEFAULT_GAZE_HOLD_MS))
+  );
+  const uint32_t moveMs = jsonMilliseconds(gaze["move_ms"], API_DEFAULT_GAZE_MOVE_MS);
   beginGaze({x, y, z}, now, holdMs, moveMs, true);
 }
 
 void handleHttpBlink(JsonDocument &doc, uint32_t now) {
+  if (currentMood(now) == Mood::Sleep) releaseApiOverrides(now);
   bool doubleBlink = jsonBool(doc["double"], false);
-  uint32_t durationMs = jsonMs(doc["duration_ms"], jsonMs(doc["duration"], 150));
+  uint32_t durationMs = jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], 150));
   if (doc["type"].is<const char *>()) {
     const char *type = doc["type"].as<const char *>();
     doubleBlink = equalsIgnoreCase(type, "double");
@@ -3110,13 +3134,14 @@ void handleHttpBlink(JsonDocument &doc, uint32_t now) {
 }
 
 void handleHttpWink(JsonDocument &doc, uint32_t now) {
+  if (currentMood(now) == Mood::Sleep) releaseApiOverrides(now);
   bool left = random(0, 2) == 0;
   if (doc["eye"].is<const char *>()) {
     const char *eye = doc["eye"].as<const char *>();
     if (equalsIgnoreCase(eye, "left") || equalsIgnoreCase(eye, "l")) left = true;
     else if (equalsIgnoreCase(eye, "right") || equalsIgnoreCase(eye, "r")) left = false;
   }
-  triggerWink(now, left, jsonMs(doc["duration_ms"], jsonMs(doc["duration"], 280)));
+  triggerWink(now, left, jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], 280)));
 }
 
 void handleHttpFlip(JsonVariantConst value) {
@@ -3138,17 +3163,32 @@ void handleHttpControl() {
   if (jsonBool(doc["release"], false)) releaseApiOverrides(now);
   if (!doc["idle"].isNull() || !doc["autonomous"].isNull()) handleHttpIdle(doc, now);
   if (!doc["sleep"].isNull() && jsonBool(doc["sleep"], true)) {
-    beginMood(Mood::Sleep, now, jsonMs(doc["sleep_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), true);
+    beginMood(Mood::Sleep, now, jsonMilliseconds(doc["sleep_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), true);
     apiState.gazeOverride = false;
   }
   if (doc["mood"].is<const char *>()) {
-    if (!handleHttpMoodName(doc["mood"].as<const char *>(), jsonMs(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), false, now)) return;
+    if (!handleHttpMoodName(
+      doc["mood"].as<const char *>(),
+      jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)),
+      false,
+      now
+    )) return;
   }
   if (doc["emotion"].is<const char *>()) {
-    if (!handleHttpMoodName(doc["emotion"].as<const char *>(), jsonMs(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), false, now)) return;
+    if (!handleHttpMoodName(
+      doc["emotion"].as<const char *>(),
+      jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)),
+      false,
+      now
+    )) return;
   }
   if (doc["expression"].is<const char *>()) {
-    if (!handleHttpMoodName(doc["expression"].as<const char *>(), jsonMs(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_EXPR_MS)), true, now)) return;
+    if (!handleHttpMoodName(
+      doc["expression"].as<const char *>(),
+      jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_EXPR_MS)),
+      true,
+      now
+    )) return;
   }
   if (doc["beat"].is<const char *>()) {
     if (!handleHttpBeatName(doc["beat"].as<const char *>(), now)) return;
@@ -3173,7 +3213,12 @@ void handleHttpMoodEndpoint(bool expressionMode) {
   const uint32_t now = millis();
   const char *name = doc["name"] | (expressionMode ? "auto" : "calm");
   const uint32_t defaultMs = expressionMode ? API_DEFAULT_EXPR_MS : API_DEFAULT_MOOD_MS;
-  if (!handleHttpMoodName(name, jsonMs(doc["duration_ms"], jsonMs(doc["duration"], defaultMs)), expressionMode, now)) return;
+  if (!handleHttpMoodName(
+    name,
+    jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], defaultMs)),
+    expressionMode,
+    now
+  )) return;
   handleHttpState();
 }
 
@@ -3222,7 +3267,7 @@ void handleHttpWinkEndpoint() {
 void handleHttpSleepEndpoint() {
   JsonDocument doc;
   if (server.hasArg("plain") && server.arg("plain").length() > 0 && !parseBody(doc)) return;
-  beginMood(Mood::Sleep, millis(), jsonMs(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), true);
+  beginMood(Mood::Sleep, millis(), jsonMilliseconds(doc["duration_ms"], jsonMs(doc["duration"], API_DEFAULT_MOOD_MS)), true);
   apiState.gazeOverride = false;
   handleHttpState();
 }
