@@ -201,6 +201,19 @@ class LocalStream:
                 payload[key] = value
         self._rpc.broadcast_threadsafe("conversation.camera_image", payload)
 
+    def _dispatch_web_page(self, msg: dict[str, object]) -> None:
+        """Push a conversation.web_page notification to JSON-RPC clients."""
+        url = msg.get("url")
+        if self._rpc is None or not isinstance(url, str) or not url:
+            return
+
+        payload: dict[str, object] = {"url": url}
+        for key in ("title", "source"):
+            value = msg.get(key)
+            if isinstance(value, str) and value:
+                payload[key] = value
+        self._rpc.broadcast_threadsafe("conversation.web_page", payload)
+
     # Audio level meter for the client orb. RMS is scaled into a visible 0..1
     # range and capped to ~15 Hz so it stays light on the DataChannel.
     _LEVEL_INTERVAL_S = 1.0 / 15.0
@@ -949,6 +962,7 @@ class LocalStream:
                 for msg in handler_output.args:
                     if isinstance(msg, dict):
                         self._dispatch_camera_image(msg)
+                        self._dispatch_web_page(msg)
                     content = msg.get("content", "")
                     if isinstance(content, str):
                         self._dispatch_log_message(msg.get("role"), content)

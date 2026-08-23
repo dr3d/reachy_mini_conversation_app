@@ -607,8 +607,8 @@ Other control fields:
 ## LLM tools exposed to the assistant
 
 The default profile exposes these tools. Use Tools → Tool access to customize any profile.
-Every bundled profile enables `head_tracking`, `set_eyes`, `set_chassis`, `cast_media`, and `show_image` by default;
-users can still disable them per personality.
+Every bundled profile enables `head_tracking`, `set_eyes`, `set_chassis`, `cast_media`, `show_image`, and
+`show_web_page` by default; users can still disable them per personality.
 
 | Tool | Action | Dependencies |
 |------|--------|--------------|
@@ -621,6 +621,7 @@ users can still disable them per personality.
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
 | `cast_media` | Search YouTube, play YouTube videos, show direct image URLs on a Cast receiver, and stop playback. | Requires `pychromecast`/`yt-dlp` and a Chromecast-compatible receiver. Configure with `REACHY_MINI_CAST_DEVICE_NAME`. |
 | `show_image` | Display a direct HTTP/HTTPS image URL in the Talk page image preview. | Core install only. Best paired with a search tool that can provide a direct image URL. |
+| `show_web_page` | Open an HTTP/HTTPS web page from the Talk page in a new tab/window, with an Open fallback if the browser blocks it. | Core install only. |
 | `set_eyes` | Control optional ESP32/RP5 face displays through their HTTP API. | Requires `REACHY_MINI_EYES_BASE_URL`. |
 | `set_chassis` | Control optional ESP32 tracked chassis through its HTTP API. | Requires `REACHY_MINI_CHASSIS_BASE_URL`. |
 | `head_tracking` | Follow the user's face with the head, or stop following. | Core install only. Requires a daemon with the `vision` extra and a camera. |

@@ -282,6 +282,38 @@ async def test_show_image_tool_result_emits_browser_image_metadata(monkeypatch: 
 
 
 @pytest.mark.asyncio
+async def test_show_web_page_tool_result_emits_browser_web_page_metadata(monkeypatch: Any) -> None:
+    """Displayed web pages should reach the UI web-page opener."""
+    handler = HuggingFaceRealtimeHandler(ToolDependencies(reachy_mini=MagicMock(), movement_manager=MagicMock()))
+    handler.connection = AsyncMock()
+    handler.output_queue = asyncio.Queue()
+    handler._in_flight_tool_calls = {"call_web"}
+    monkeypatch.setattr(handler, "_wait_for_response_done_before_tool_result", AsyncMock(return_value=True))
+    monkeypatch.setattr(handler, "_safe_response_create", AsyncMock())
+
+    await handler._handle_tool_result(
+        ToolNotification(
+            id="call_web",
+            tool_name="show_web_page",
+            is_idle_tool_call=False,
+            status=ToolState.COMPLETED,
+            result={"status": "ok", "url": "https://example.com/reachy", "source": "web", "title": "Reachy"},
+        )
+    )
+
+    await handler.output_queue.get()
+    web_page_output = await handler.output_queue.get()
+
+    assert web_page_output.args[0] == {
+        "role": "web_page",
+        "content": "Displayed web page.",
+        "url": "https://example.com/reachy",
+        "source": "web",
+        "title": "Reachy",
+    }
+
+
+@pytest.mark.asyncio
 async def test_speech_started_during_assistant_playback_does_not_flush(monkeypatch: Any) -> None:
     """Echo-triggered VAD should not clear queued assistant audio."""
     monkeypatch.setattr(hf_mod, "get_session_instructions", lambda _instance_path=None: "test")

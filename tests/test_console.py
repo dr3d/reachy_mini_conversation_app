@@ -940,6 +940,28 @@ def test_rpc_display_image_url_notification_broadcast() -> None:
     }
 
 
+def test_rpc_web_page_notification_broadcast() -> None:
+    """Web page URLs are available to the browser tab opener."""
+    app = FastAPI()
+    stream = LocalStream(MagicMock(), _rpc_robot(), settings_app=app)
+    stream._init_settings_ui_if_needed()
+    with TestClient(app).websocket_connect("/rpc") as ws:
+        stream._dispatch_web_page(
+            {
+                "url": "https://example.com/reachy",
+                "source": "web",
+                "title": "Reachy",
+            }
+        )
+        msg = ws.receive_json()
+    assert msg["method"] == "conversation.web_page"
+    assert msg["params"] == {
+        "url": "https://example.com/reachy",
+        "source": "web",
+        "title": "Reachy",
+    }
+
+
 def test_rpc_settings_methods() -> None:
     """Personality, voice, and tool settings are reachable over /rpc."""
     app = FastAPI()

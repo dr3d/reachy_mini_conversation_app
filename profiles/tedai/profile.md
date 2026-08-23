@@ -11,6 +11,7 @@ default_tools = [
   "move_head",
   "cast_media",
   "show_image",
+  "show_web_page",
   "set_eyes",
   "set_chassis",
   "go_to_sleep",

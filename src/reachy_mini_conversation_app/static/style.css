@@ -831,6 +831,67 @@ button {
   aspect-ratio: 16 / 9;
 }
 
+.talk-web {
+  width: min(100%, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.talk-web[hidden] {
+  display: none;
+}
+
+.talk-web__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.talk-web__heading {
+  min-width: 0;
+}
+
+.talk-web__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.talk-web__status {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.talk-web__open {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.talk-web__open:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-hover);
+  color: var(--text);
+}
+
 .talk-log {
   width: min(100%, 720px);
   max-height: min(34vh, 320px);

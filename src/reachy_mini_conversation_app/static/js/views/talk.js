@@ -61,6 +61,18 @@ export async function mountTalkView({ outlet, signal }) {
     h("div", { class: "talk-camera__header" }, cameraTitle, cameraStatus),
     cameraImage
   );
+  const webStatus = h("span", { class: "talk-web__status" }, "");
+  const webTitle = h("h2", { class: "talk-web__title" }, "Current Web Page");
+  const webOpenLink = h(
+    "a",
+    { class: "talk-web__open", href: "#", target: "_blank", rel: "noopener noreferrer" },
+    "Open"
+  );
+  const webPane = h(
+    "section",
+    { class: "talk-web", "aria-label": "Current web page", hidden: "hidden" },
+    h("div", { class: "talk-web__header" }, h("div", { class: "talk-web__heading" }, webTitle, webStatus), webOpenLink)
+  );
   const logStatus = h("span", { class: "talk-log__status" }, "Live");
   const logItems = h("ol", { class: "talk-log__items", "aria-live": "polite" });
   const logPane = h(
@@ -92,6 +104,7 @@ export async function mountTalkView({ outlet, signal }) {
     h("div", { class: "talk__orb-wrap" }, orb.root),
     caption,
     cameraPane,
+    webPane,
     logPane
   );
   outlet.replaceChildren(view);
@@ -167,6 +180,16 @@ export async function mountTalkView({ outlet, signal }) {
       cameraPane.hidden = false;
       cameraStatus.textContent = timestamp();
       appendLogEntry("tool", imageUrl ? "Image" : "Camera", imageUrl ? "Displayed image." : "Captured camera image.");
+    },
+    onWebPage: (params) => {
+      const url = params?.url;
+      if (!validWebUrl(url)) return;
+      webOpenLink.href = url;
+      const openedWindow = openWebPage(url);
+      webTitle.textContent = params?.title || "Current Web Page";
+      webPane.hidden = false;
+      webStatus.textContent = `${timestamp()} - ${openedWindow ? "Opened" : "Open blocked"}`;
+      appendLogEntry("tool", "Web page", openedWindow ? "Opened web page." : "Web page ready to open.");
     },
   });
 
@@ -279,7 +302,7 @@ async function fetchPersonalityState() {
   }
 }
 
-function subscribeConversationEvents({ onActivity, onReady, onTranscript, onLog, onCameraImage } = {}) {
+function subscribeConversationEvents({ onActivity, onReady, onTranscript, onLog, onCameraImage, onWebPage } = {}) {
   if (typeof onActivity !== "function") {
     throw new TypeError("subscribeConversationEvents: onActivity is required");
   }
@@ -299,6 +322,9 @@ function subscribeConversationEvents({ onActivity, onReady, onTranscript, onLog,
   }
   if (typeof onCameraImage === "function") {
     unsubscribers.push(subscribe("conversation.camera_image", onCameraImage));
+  }
+  if (typeof onWebPage === "function") {
+    unsubscribers.push(subscribe("conversation.web_page", onWebPage));
   }
 
   // The socket connects lazily, so schedule the initial mic and orb sync.
@@ -338,4 +364,24 @@ function prettifyLogRole(role) {
 
 function validImageMimeType(value) {
   return value === "image/png" || value === "image/webp" || value === "image/jpeg" ? value : "image/jpeg";
+}
+
+function validWebUrl(value) {
+  if (typeof value !== "string" || !value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function openWebPage(url) {
+  try {
+    const openedWindow = window.open(url, "_blank");
+    if (openedWindow) openedWindow.opener = null;
+    return Boolean(openedWindow);
+  } catch {
+    return false;
+  }
 }

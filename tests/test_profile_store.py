@@ -66,7 +66,7 @@ def test_profile_listing_requires_profile_document(tmp_path: Path) -> None:
 
 def test_bundled_profiles_enable_robot_surface_tools_by_default() -> None:
     """Every bundled personality should start with common robot surface tools available."""
-    expected_tools = {"cast_media", "show_image", "set_eyes", "set_chassis", "head_tracking"}
+    expected_tools = {"cast_media", "show_image", "show_web_page", "set_eyes", "set_chassis", "head_tracking"}
     for profile_name in list_profile_names(DEFAULT_PROFILES_DIRECTORY):
         profile = read_profile_from_directory(profile_name, DEFAULT_PROFILES_DIRECTORY / profile_name)
 
