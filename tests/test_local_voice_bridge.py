@@ -9,6 +9,7 @@ from local_voice_bridge.server import (
     _speech_text,
     _Qwen3HttpTts,
     _split_tts_text,
+    _tts_chunk_chars,
     _FasterWhisperStt,
     _limit_spoken_text,
     _build_stt_provider,
@@ -50,22 +51,45 @@ def test_speech_text_still_maps_emoji_emotions() -> None:
 
 
 def test_split_tts_text_prefers_sentence_boundaries() -> None:
-    """Long TTS text should split into speakable chunks."""
+    """Long TTS text should keep whole sentences when possible."""
     text = "One short sentence. This next sentence is a little longer but still reasonable. Final bit."
 
     assert _split_tts_text(text, 45) == [
         "One short sentence.",
-        "This next sentence is a little longer but",
-        "still reasonable.",
+        "This next sentence is a little longer but still reasonable.",
         "Final bit.",
     ]
 
 
-def test_split_tts_text_wraps_overlong_sentences() -> None:
-    """Overlong sentences should wrap on words."""
+def test_split_tts_text_uses_obvious_phrase_boundaries() -> None:
+    """Overlong sentences should split on punctuation before words."""
+    chunks = _split_tts_text("alpha beta gamma, delta epsilon, zeta eta theta.", 24)
+
+    assert chunks == ["alpha beta gamma,", "delta epsilon,", "zeta eta theta."]
+
+
+def test_split_tts_text_avoids_word_wrapping_normal_sentences() -> None:
+    """Normal over-limit sentences should not be chopped mid-thought."""
     chunks = _split_tts_text("alpha beta gamma delta epsilon", 16)
 
-    assert chunks == ["alpha beta gamma", "delta epsilon"]
+    assert chunks == ["alpha beta gamma delta epsilon"]
+
+
+def test_tts_chunk_chars_uses_large_kokoro_default(monkeypatch) -> None:
+    """Kokoro should avoid chunking except for large responses."""
+    monkeypatch.setenv("LOCAL_BRIDGE_TTS_PROVIDER", "kokoro")
+    monkeypatch.delenv("LOCAL_BRIDGE_KOKORO_TTS_CHUNK_CHARS", raising=False)
+    monkeypatch.setenv("LOCAL_BRIDGE_TTS_CHUNK_CHARS", "80")
+
+    assert _tts_chunk_chars() == 480
+
+
+def test_tts_chunk_chars_keeps_qwen_specific_limit(monkeypatch) -> None:
+    """Qwen3-TTS keeps the smaller protective chunk size."""
+    monkeypatch.setenv("LOCAL_BRIDGE_TTS_PROVIDER", "qwen3tts")
+    monkeypatch.setenv("LOCAL_BRIDGE_TTS_CHUNK_CHARS", "80")
+
+    assert _tts_chunk_chars() == 80
 
 
 def test_limit_spoken_text_prefers_complete_sentences() -> None:

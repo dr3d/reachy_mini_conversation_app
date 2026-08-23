@@ -260,12 +260,44 @@ def _split_tts_text(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _tts_chunk_chars() -> int:
+    provider = _env("LOCAL_BRIDGE_TTS_PROVIDER").lower()
+    if provider == "kokoro":
+        return _env_int("LOCAL_BRIDGE_KOKORO_TTS_CHUNK_CHARS", 480)
+    if provider == "qwen3tts":
+        return _env_int("LOCAL_BRIDGE_QWEN_TTS_CHUNK_CHARS", _env_int("LOCAL_BRIDGE_TTS_CHUNK_CHARS", 80))
+    return _env_int("LOCAL_BRIDGE_TTS_CHUNK_CHARS", 240)
+
+
 def _split_long_tts_sentence(sentence: str, max_chars: int) -> list[str]:
+    phrase_units = [match.group(0).strip() for match in re.finditer(r"[^,;:]+(?:[,;:]+|$)", sentence)]
+    if len(phrase_units) <= 1:
+        return _split_overlong_phrase(sentence, max_chars)
+
     chunks: list[str] = []
     current = ""
-    for word in sentence.split():
-        candidate = f"{current} {word}".strip()
+    for phrase in phrase_units:
+        candidate = f"{current} {phrase}".strip()
         if current and len(candidate) > max_chars:
+            chunks.append(current)
+            current = phrase
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_overlong_phrase(phrase: str, max_chars: int) -> list[str]:
+    hard_max_chars = max(max_chars * 3, 240)
+    if len(phrase) <= hard_max_chars:
+        return [phrase]
+
+    chunks: list[str] = []
+    current = ""
+    for word in phrase.split():
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > hard_max_chars:
             chunks.append(current)
             current = word
         else:
@@ -1089,7 +1121,7 @@ class _BridgeSession:
                         "transcript": text,
                     }
                 )
-                tts_chunks = _split_tts_text(text, _env_int("LOCAL_BRIDGE_TTS_CHUNK_CHARS", 80))
+                tts_chunks = _split_tts_text(text, _tts_chunk_chars())
                 logger.info("Synthesizing response as %d TTS chunk(s), text_chars=%d", len(tts_chunks), len(text))
                 await self._synthesize_and_stream_tts_chunks(tts_chunks, response_id, item_id)
 

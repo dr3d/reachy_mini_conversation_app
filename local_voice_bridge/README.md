@@ -105,6 +105,8 @@ $env:LOCAL_BRIDGE_KOKORO_VOICE = "am_eric"
 ```
 
 The Kokoro voices are bundled in `voices-v1.0.bin`; switch voices by changing `LOCAL_BRIDGE_KOKORO_VOICE`.
+Kokoro can handle larger phrases than Qwen3-TTS; use `LOCAL_BRIDGE_KOKORO_TTS_CHUNK_CHARS` to avoid mid-sentence
+pauses except on very large responses.
 Good first picks: `am_eric`, `am_liam`, `am_michael`, `af_sarah`, `af_bella`, `bf_emma`, `bf_alice`,
 `bm_daniel`, and `bm_george`.
 
@@ -132,7 +134,8 @@ receives Qwen's WAV response and converts it to the 16 kHz mono PCM expected by 
 `0.6B-CustomVoice` is the lower-latency default; use `1.7B-CustomVoice` for higher-quality experiments.
 For interactive use, keep `LOCAL_BRIDGE_MAX_SPOKEN_CHARS` low enough that routine replies fit in one or two
 sentences. Qwen3-TTS is still the slowest stage, so the bridge also exposes `LOCAL_BRIDGE_AUDIO_DELTA_PACE`,
-`LOCAL_BRIDGE_WS_PING_INTERVAL_S`, and `LOCAL_BRIDGE_WS_PING_TIMEOUT_S` to avoid cutting off longer spoken turns.
+`LOCAL_BRIDGE_QWEN_TTS_CHUNK_CHARS`, `LOCAL_BRIDGE_WS_PING_INTERVAL_S`, and `LOCAL_BRIDGE_WS_PING_TIMEOUT_S` to avoid
+cutting off longer spoken turns.
 
 On Windows, TTS falls back to SAPI if no provider is configured. For another TTS engine, set `LOCAL_BRIDGE_TTS_COMMAND` to a command that receives text and an output WAV path:
 
