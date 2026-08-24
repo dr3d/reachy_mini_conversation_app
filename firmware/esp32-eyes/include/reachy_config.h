@@ -25,6 +25,34 @@
 #define REACHY_MOUTH_CS 17
 #define REACHY_MOUTH_DC REACHY_SHARED_DC
 
+// Optional fourth rectangular 240x320 SPI TFT. It shares the display bus and
+// gets its own chip-select line.
+#define REACHY_AUX_SCLK REACHY_SHARED_SCLK
+#define REACHY_AUX_MOSI REACHY_SHARED_MOSI
+#define REACHY_AUX_RST REACHY_SHARED_RST
+#define REACHY_AUX_CS 18
+#define REACHY_AUX_DC REACHY_SHARED_DC
+
+// Set to 0 to keep REACHY_AUX_CS driven HIGH while skipping aux TFT init/draw.
+#ifndef REACHY_AUX_DISPLAY_ENABLED
+#define REACHY_AUX_DISPLAY_ENABLED 1
+#endif
+
+#define REACHY_AUX_ROLE_STATUS 0
+#define REACHY_AUX_ROLE_MOUTH_MIRROR 1
+#define REACHY_AUX_ROLE_MOUTH_ONLY 2
+
+// Default to the rectangular mouth and idle the round mouth to save display time.
+#ifndef REACHY_AUX_ROLE
+#define REACHY_AUX_ROLE REACHY_AUX_ROLE_MOUTH_ONLY
+#endif
+
+// When the rectangular aux display is the mouth, reuse the old round mouth as a
+// slow status display. Set to 0 to leave GPIO17 black/idle.
+#ifndef REACHY_MOUTH_STATUS_WHEN_AUX_MOUTH
+#define REACHY_MOUTH_STATUS_WHEN_AUX_MOUTH 1
+#endif
+
 #if __has_include("reachy_config_private.h")
 #include "reachy_config_private.h"
 #endif
