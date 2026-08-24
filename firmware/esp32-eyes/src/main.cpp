@@ -919,6 +919,7 @@ bool mouthStatusNeedsFullPaint = true;
 bool mouthStatusDotDrawn = false;
 int16_t mouthStatusDotX = 120;
 int16_t mouthStatusDotY = 120;
+char mouthStatusLastValues[4][24] = {{0}};
 #else
 #define REACHY_MOUTH_STATUS_DISPLAY 0
 #endif
@@ -2539,12 +2540,17 @@ void renderAuxDisplay(uint32_t now) {
 #endif
 
 #if REACHY_MOUTH_STATUS_DISPLAY
+constexpr int16_t MOUTH_STATUS_ROW_X = 34;
+constexpr int16_t MOUTH_STATUS_ROW_W = 172;
+constexpr int16_t MOUTH_STATUS_ROW_H = 42;
+constexpr int16_t MOUTH_STATUS_ROW_Y[4] = {20, 70, 120, 170};
+
 void printMouthStatusText(int16_t x, int16_t y, const char *text, uint16_t color, uint8_t size = 1) {
-  mouthTft.setTextSize(size);
-  mouthTft.setTextColor(color);
-  mouthTft.setTextWrap(false);
-  mouthTft.setCursor(x, y);
-  mouthTft.print(text);
+  frame.setTextSize(size);
+  frame.setTextColor(color);
+  frame.setTextWrap(false);
+  frame.setCursor(x, y);
+  frame.print(text);
 }
 
 void printCenteredMouthStatusText(int16_t x, int16_t y, int16_t w, const char *text, uint16_t color, uint8_t size = 1) {
@@ -2553,23 +2559,28 @@ void printCenteredMouthStatusText(int16_t x, int16_t y, int16_t w, const char *t
   printMouthStatusText(tx, y, text, color, size);
 }
 
-void drawMouthStatusRow(int16_t x, int16_t y, int16_t w, int16_t h, const char *label, const char *value) {
+void drawMouthStatusRowShell(uint8_t row) {
   const uint16_t panel = rgb(10, 18, 25);
-  mouthTft.fillRect(x + 10, y + 18, w - 20, h - 22, panel);
+  const uint16_t line = rgb(34, 68, 85);
+  const int16_t y = MOUTH_STATUS_ROW_Y[row];
+  frame.fillRoundRect(MOUTH_STATUS_ROW_X, y, MOUTH_STATUS_ROW_W, MOUTH_STATUS_ROW_H, 8, panel);
+  frame.drawRoundRect(MOUTH_STATUS_ROW_X, y, MOUTH_STATUS_ROW_W, MOUTH_STATUS_ROW_H, 8, line);
+}
+
+void drawMouthStatusRow(uint8_t row, const char *label, const char *value) {
+  const uint16_t panel = rgb(10, 18, 25);
+  const int16_t x = MOUTH_STATUS_ROW_X;
+  const int16_t y = MOUTH_STATUS_ROW_Y[row];
+  const int16_t w = MOUTH_STATUS_ROW_W;
+  const int16_t h = MOUTH_STATUS_ROW_H;
+  frame.fillRect(x + 10, y + 18, w - 20, h - 22, panel);
   printCenteredMouthStatusText(x + 10, y + 5, w - 20, label, rgb(106, 138, 158), 1);
   printCenteredMouthStatusText(x + 10, y + 18, w - 20, value, rgb(218, 235, 232), strlen(value) > 13 ? 1 : 2);
 }
 
 void drawMouthStatusRows() {
-  constexpr int16_t rowX = 34;
-  constexpr int16_t rowW = 172;
-  constexpr int16_t rowH = 42;
-  constexpr int16_t rowY[4] = {20, 70, 120, 170};
-  const uint16_t panel = rgb(10, 18, 25);
-  const uint16_t line = rgb(34, 68, 85);
   for (uint8_t i = 0; i < 4; ++i) {
-    mouthTft.fillRoundRect(rowX, rowY[i], rowW, rowH, 8, panel);
-    mouthTft.drawRoundRect(rowX, rowY[i], rowW, rowH, 8, line);
+    drawMouthStatusRowShell(i);
   }
 }
 
@@ -2582,33 +2593,37 @@ void renderMouthStatusDisplay(uint32_t now) {
   const uint16_t dot = rgb(88, 228, 126);
   const Mood mood = currentMood(now);
   const MouthShape mouth = activeMouthShape(now);
+  const char *labels[4] = {"EYES", "MOUTH", "MOOD", "BEAT"};
+  const char *values[4] = {eyeStyleName(eyeRenderStyle), mouthShapeName(mouth), moodName(mood), idleBeatName(idleDirector.beat)};
+  const int16_t nextDotX = maxi16(10, mini16(120 + int16_t(clampf(gazeState.now.x / MAX_GAZE_X_PX, -1.0f, 1.0f) * 96.0f), 230));
+  const int16_t nextDotY = maxi16(10, mini16(120 - int16_t(clampf(gazeState.now.y / MAX_GAZE_Y_PX, -1.0f, 1.0f) * 96.0f), 230));
+  const bool dotMoved = !mouthStatusDotDrawn || abs(nextDotX - mouthStatusDotX) >= 3 || abs(nextDotY - mouthStatusDotY) >= 3;
+  bool statusDirty = mouthStatusNeedsFullPaint;
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (strncmp(mouthStatusLastValues[i], values[i], sizeof(mouthStatusLastValues[i])) != 0) {
+      statusDirty = true;
+    }
+  }
+  if (!statusDirty && !dotMoved) return;
 
   deselectDisplayBus();
-  if (mouthStatusNeedsFullPaint) {
-    mouthTft.fillScreen(bg);
-    mouthTft.fillCircle(120, 120, 118, rgb(5, 12, 18));
-    mouthTft.drawCircle(120, 120, 116, line);
-    mouthStatusDotDrawn = false;
-    mouthStatusNeedsFullPaint = false;
-  }
-
-  if (mouthStatusDotDrawn) {
-    mouthTft.fillCircle(mouthStatusDotX, mouthStatusDotY, 9, rgb(5, 12, 18));
-  }
-  mouthTft.drawCircle(120, 120, 116, line);
+  frame.fillScreen(bg);
+  frame.fillCircle(120, 120, 118, rgb(5, 12, 18));
+  frame.drawCircle(120, 120, 116, line);
   drawMouthStatusRows();
-  drawMouthStatusRow(34, 20, 172, 42, "EYES", eyeStyleName(eyeRenderStyle));
-  drawMouthStatusRow(34, 70, 172, 42, "MOUTH", mouthShapeName(mouth));
-  drawMouthStatusRow(34, 120, 172, 42, "MOOD", moodName(mood));
-  drawMouthStatusRow(34, 170, 172, 42, "BEAT", idleBeatName(idleDirector.beat));
+  for (uint8_t i = 0; i < 4; ++i) {
+    drawMouthStatusRow(i, labels[i], values[i]);
+    strncpy(mouthStatusLastValues[i], values[i], sizeof(mouthStatusLastValues[i]) - 1);
+    mouthStatusLastValues[i][sizeof(mouthStatusLastValues[i]) - 1] = '\0';
+  }
 
-  mouthStatusDotX = 120 + int16_t(clampf(gazeState.now.x / MAX_GAZE_X_PX, -1.0f, 1.0f) * 96.0f);
-  mouthStatusDotY = 120 - int16_t(clampf(gazeState.now.y / MAX_GAZE_Y_PX, -1.0f, 1.0f) * 96.0f);
-  mouthStatusDotX = maxi16(10, mini16(mouthStatusDotX, 230));
-  mouthStatusDotY = maxi16(10, mini16(mouthStatusDotY, 230));
-  mouthTft.drawCircle(mouthStatusDotX, mouthStatusDotY, 7, dot);
-  mouthTft.fillCircle(mouthStatusDotX, mouthStatusDotY, 2, dot);
+  mouthStatusDotX = nextDotX;
+  mouthStatusDotY = nextDotY;
+  frame.drawCircle(mouthStatusDotX, mouthStatusDotY, 7, dot);
+  frame.fillCircle(mouthStatusDotX, mouthStatusDotY, 2, dot);
   mouthStatusDotDrawn = true;
+  mouthStatusNeedsFullPaint = false;
+  mouthTft.drawRGBBitmap(0, 0, frame.getBuffer(), SCREEN_W, SCREEN_H);
   deselectDisplayBus();
 }
 #endif
